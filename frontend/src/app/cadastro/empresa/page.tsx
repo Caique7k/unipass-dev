@@ -2,43 +2,51 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Building2,
-  CheckCircle2,
-  ChevronRight,
-  ShieldCheck,
-  Smartphone,
-  Sparkles,
+  Check,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { AuthShell } from "@/components/auth/AuthShell";
+import {
+  Field,
+  FieldMessage,
+  Spinner,
+  fieldBorderClass,
+  fieldErrorBorderClass,
+  fieldInputClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+} from "@/components/auth/fields";
 import { cn } from "@/lib/utils";
 import api from "@/services/api";
 
 const steps = [
-  { id: 1, label: "Empresa", icon: Building2 },
-  { id: 2, label: "SMS", icon: Smartphone },
-  { id: 3, label: "Plano", icon: Sparkles },
-  { id: 4, label: "Acesso", icon: ShieldCheck },
+  { id: 1, label: "Empresa", hint: "Identidade e domínio" },
+  { id: 2, label: "Verificação", hint: "Código por SMS" },
+  { id: 3, label: "Plano", hint: "Ritmo da implantação" },
+  { id: 4, label: "Acesso", hint: "Primeiro administrador" },
 ];
 
 const plans = [
   {
     id: "ESSENTIAL",
     name: "Essential",
-    price: "R$ 249/mês",
+    price: "R$ 249",
+    period: "/mês",
     description: "Para operações iniciando com visibilidade e cadastros centralizados.",
     features: ["Painel operacional", "Domínio da empresa", "Usuários e alunos"],
   },
   {
     id: "GROWTH",
     name: "Growth",
-    price: "R$ 499/mês",
+    price: "R$ 499",
+    period: "/mês",
     description: "Para operações que já precisam de ritmo, dispositivos e time maior.",
     features: ["Tudo do Essential", "Mais dispositivos", "Mais coordenação"],
   },
@@ -46,6 +54,7 @@ const plans = [
     id: "SCALE",
     name: "Scale",
     price: "Sob consulta",
+    period: "",
     description: "Para empresas com múltiplas frentes e rollout mais robusto.",
     features: ["Suporte prioritário", "Implantação assistida", "Escala institucional"],
   },
@@ -93,6 +102,13 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+const stepMotion = {
+  initial: { opacity: 0, x: 24 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -24 },
+  transition: { duration: 0.3, ease: [0.2, 0.8, 0.2, 1] as const },
+};
+
 export default function CompanyOnboardingPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [checkingDomain, setCheckingDomain] = useState(false);
@@ -104,6 +120,7 @@ export default function CompanyOnboardingPage() {
   const [verifyingSms, setVerifyingSms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [showPassword, setShowPassword] = useState(false);
   const [success, setSuccess] = useState<{ loginEmail: string; plan: string } | null>(
     null,
   );
@@ -122,20 +139,25 @@ export default function CompanyOnboardingPage() {
   });
 
   const selectedPlan = plans.find((plan) => plan.id === form.plan) ?? plans[1];
+  const normalizedDomainPreview =
+    domainState?.normalizedDomain ?? form.domain.replace(/^@+/, "");
   const adminEmailPreview = useMemo(() => {
-    const normalizedDomain = domainState?.normalizedDomain ?? form.domain.replace(/^@+/, "");
-
     if (!form.adminLogin.trim()) {
-      return normalizedDomain ? `@${normalizedDomain}` : "";
+      return normalizedDomainPreview ? `@${normalizedDomainPreview}` : "";
     }
 
-    return normalizedDomain
-      ? `${form.adminLogin.trim().toLowerCase()}@${normalizedDomain}`
+    return normalizedDomainPreview
+      ? `${form.adminLogin.trim().toLowerCase()}@${normalizedDomainPreview}`
       : form.adminLogin.trim().toLowerCase();
-  }, [domainState?.normalizedDomain, form.adminLogin, form.domain]);
+  }, [form.adminLogin, normalizedDomainPreview]);
 
   function setFieldError(key: keyof FormErrors, value?: string) {
     setErrors((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateField<K extends keyof typeof form>(key: K, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    if (key in errors) setFieldError(key as keyof FormErrors);
   }
 
   function validateStepOne() {
@@ -326,464 +348,552 @@ export default function CompanyOnboardingPage() {
     }
   }
 
+  const hasErrors = Object.values(errors).some(Boolean);
+
   if (success) {
     return (
-      <main className="min-h-screen bg-[linear-gradient(180deg,#fbfbfd_0%,#f5f5f7_36%,#ffffff_100%)] px-6 py-10 text-[#111111] sm:px-8">
-        <div className="mx-auto flex min-h-[80vh] max-w-3xl items-center">
-          <Card className="w-full rounded-[36px] border-white/80 bg-white/85 p-4 shadow-[0_30px_100px_rgba(15,23,42,0.10)] backdrop-blur-2xl">
-            <CardContent className="space-y-6 p-6 sm:p-10">
-              <div className="flex size-16 items-center justify-center rounded-3xl bg-[#ecf8f1] text-[#17803d]">
-                <CheckCircle2 className="size-8" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#17803d]">
-                  Cadastro concluído
-                </p>
-                <h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em]">
-                  Sua empresa já pode entrar no UniPass.
-                </h1>
-                <p className="mt-4 text-base leading-8 text-[#5f5f5a]">
-                  O administrador inicial foi criado com o e-mail <strong>{success.loginEmail}</strong>.
-                  O plano selecionado foi <strong>{success.plan}</strong>.
-                </p>
-              </div>
+      <AuthShell backHref="/login" backLabel="Ir para o login">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-auto flex min-h-[calc(100svh-4rem)] max-w-2xl flex-col justify-center py-16"
+        >
+          <p className="font-mono text-xs uppercase tracking-[0.22em] text-emerald-600 dark:text-emerald-400">
+            cadastro concluído
+          </p>
+          <h1 className="mt-5 text-4xl font-semibold leading-[1.05] tracking-[-0.04em] sm:text-5xl">
+            Sua empresa já pode
+            <br />
+            <span className="text-[#111111]/40 dark:text-[#f4f4f4]/40">
+              entrar no UniPass.
+            </span>
+          </h1>
 
-              <div className="rounded-[28px] border border-[#e5e7eb] bg-[#fafaf8] p-5 text-sm text-[#575752]">
-                Próximo passo: entre no painel, cadastre seus alunos com o domínio da empresa
-                e depois crie os acessos dos alunos a partir desses cadastros.
-              </div>
+          <dl className="mt-10 divide-y divide-black/10 border-y border-black/10 font-mono text-sm dark:divide-white/10 dark:border-white/10">
+            <div className="flex flex-wrap justify-between gap-3 py-4">
+              <dt className="text-[#111111]/50 dark:text-[#f4f4f4]/50">login do administrador</dt>
+              <dd className="break-all">{success.loginEmail}</dd>
+            </div>
+            <div className="flex justify-between gap-3 py-4">
+              <dt className="text-[#111111]/50 dark:text-[#f4f4f4]/50">plano</dt>
+              <dd>{success.plan}</dd>
+            </div>
+          </dl>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Link
-                  href="/login"
-                  className="inline-flex h-12 items-center justify-center rounded-2xl bg-[#ff5c00] px-6 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(255,92,0,0.22)] transition hover:bg-[#eb5600]"
-                >
-                  Ir para o login
-                </Link>
-                <Link
-                  href="/"
-                  className="inline-flex h-12 items-center justify-center rounded-2xl border border-[#deded7] bg-white px-6 text-sm font-semibold text-[#1f1f1c] transition hover:bg-[#fafaf7]"
-                >
-                  Voltar para a landing page
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
+          <p className="mt-6 max-w-lg text-sm leading-7 text-[#111111]/60 dark:text-[#f4f4f4]/60">
+            Próximo passo: entre no painel, cadastre seus alunos com o domínio da
+            empresa e depois crie os acessos dos alunos a partir desses cadastros.
+          </p>
+
+          <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+            <Link href="/login" className={primaryButtonClass}>
+              Ir para o login
+              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+            </Link>
+            <Link href="/" className={secondaryButtonClass}>
+              Voltar para o início
+            </Link>
+          </div>
+        </motion.div>
+      </AuthShell>
     );
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[linear-gradient(180deg,#fbfbfd_0%,#f5f5f7_36%,#ffffff_100%)] px-6 py-6 text-[#111111] sm:px-8 lg:px-10">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/2 top-[-12rem] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-white/90 blur-3xl" />
-        <div className="absolute right-[-8rem] top-20 h-[24rem] w-[24rem] rounded-full bg-[#e7eefc]/52 blur-3xl" />
-        <div className="absolute bottom-[-10rem] left-[-6rem] h-[20rem] w-[20rem] rounded-full bg-[#ffe6d2]/50 blur-3xl" />
-      </div>
-
-      <div className="relative mx-auto max-w-7xl">
-        <div className="flex items-center justify-between rounded-full border border-white/70 bg-white/60 px-5 py-3 shadow-[0_10px_40px_rgba(15,23,42,0.06)] backdrop-blur-xl">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-sm font-medium text-[#3b3b37]"
-          >
-            <ArrowLeft className="size-4" />
-            Voltar
-          </Link>
-          <p className="hidden text-sm text-[#666661] sm:block">
-            Onboarding da empresa em 4 etapas
-          </p>
-        </div>
-
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]">
-          <section className="rounded-[40px] border border-white/80 bg-white/72 p-5 shadow-[0_30px_100px_rgba(15,23,42,0.08)] backdrop-blur-2xl sm:p-8">
-            <div className="flex flex-wrap items-center gap-3">
-              {steps.map((step, index) => {
-                const Icon = step.icon;
-                const active = step.id === currentStep;
-                const completed = step.id < currentStep || (step.id === 2 && smsVerified);
-
-                return (
-                  <div key={step.id} className="flex items-center gap-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex size-11 items-center justify-center rounded-2xl border text-sm font-semibold transition ${
-                          active
-                            ? "border-[#ff5c00] bg-[#fff1e8] text-[#ff5c00]"
-                            : completed
-                              ? "border-[#bde4c8] bg-[#ecf8f1] text-[#17803d]"
-                              : "border-[#e6e6df] bg-white text-[#7a7a74]"
-                        }`}
-                      >
-                        {completed ? <CheckCircle2 className="size-5" /> : <Icon className="size-5" />}
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.16em] text-[#84847f]">
-                          Etapa {step.id}
-                        </p>
-                        <p className="text-sm font-semibold text-[#111111]">{step.label}</p>
-                      </div>
-                    </div>
-                    {index < steps.length - 1 && (
-                      <div className="hidden h-px w-8 bg-[#deded7] sm:block" />
+    <AuthShell backHref="/" backLabel="Voltar">
+      <div className="grid gap-12 py-12 lg:grid-cols-[13rem_minmax(0,1fr)_16rem] lg:gap-16 lg:py-20">
+        <ol className="flex gap-6 overflow-x-auto [scrollbar-width:none] lg:flex-col lg:gap-0 lg:overflow-visible">
+          {steps.map((step, index) => {
+            const active = step.id === currentStep;
+            const completed =
+              step.id < currentStep || (step.id === 2 && smsVerified);
+            return (
+              <li
+                key={step.id}
+                className="relative flex shrink-0 items-start gap-3 lg:pb-8"
+              >
+                {index < steps.length - 1 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-[11px] top-7 hidden h-[calc(100%-1.75rem)] w-px bg-black/10 lg:block dark:bg-white/10"
+                  >
+                    <motion.span
+                      className="block w-full bg-[#ff5c00]"
+                      animate={{ height: completed ? "100%" : "0%" }}
+                      transition={{ duration: 0.5, ease: "easeOut" }}
+                    />
+                  </span>
+                )}
+                <span
+                  className={cn(
+                    "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] transition-colors",
+                    completed
+                      ? "border-[#ff5c00] bg-[#ff5c00] text-white"
+                      : active
+                        ? "border-[#ff5c00] text-[#ff5c00]"
+                        : "border-black/20 text-[#111111]/45 dark:border-white/20 dark:text-[#f4f4f4]/45",
+                  )}
+                >
+                  {completed ? <Check className="size-3" /> : step.id}
+                </span>
+                <span className="whitespace-nowrap">
+                  <span
+                    className={cn(
+                      "block text-sm font-semibold",
+                      active
+                        ? ""
+                        : "text-[#111111]/55 dark:text-[#f4f4f4]/55",
                     )}
-                  </div>
-                );
-              })}
-            </div>
+                  >
+                    {step.label}
+                  </span>
+                  <span className="hidden text-xs text-[#111111]/45 lg:block dark:text-[#f4f4f4]/45">
+                    {step.hint}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ol>
 
-            <div className="mt-8">
-              {currentStep === 1 && (
-                <div className="space-y-6">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7a7a74]">
-                      Empresa
-                    </p>
-                    <h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em]">
-                      Comece pelo domínio e identidade da operação.
-                    </h1>
-                    <p className="mt-4 max-w-2xl text-base leading-8 text-[#5f5f5a]">
-                      Esse domínio será a assinatura da sua empresa no UniPass e vai
-                      amarrar alunos, usuários e acessos.
-                    </p>
-                  </div>
+        <div className="min-w-0">
+          <AnimatePresence mode="wait" initial={false}>
+            {currentStep === 1 && (
+              <motion.section key="step-1" {...stepMotion} className="space-y-8">
+                <StepHeader
+                  eyebrow="01 · Empresa"
+                  title="Comece pelo domínio e pela identidade da operação."
+                  text="O domínio vira a assinatura da empresa no UniPass: todo usuário e aluno entra com um e-mail dele."
+                />
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Nome da empresa" value={form.companyName} onChange={(value) => { setForm((prev) => ({ ...prev, companyName: value })); setFieldError("companyName"); }} placeholder="Tavares Transporte" error={errors.companyName} />
-                    <Field label="Responsável" value={form.contactName} onChange={(value) => { setForm((prev) => ({ ...prev, contactName: value })); setFieldError("contactName"); }} placeholder="Caique Alves" error={errors.contactName} />
-                    <Field label="Celular" value={form.phone} onChange={(value) => { setForm((prev) => ({ ...prev, phone: value })); setFieldError("phone"); }} placeholder="(17) 98810-3154" error={errors.phone} />
-                    <Field label="CNPJ" value={form.cnpj} onChange={(value) => { setForm((prev) => ({ ...prev, cnpj: value })); setFieldError("cnpj"); }} placeholder="00.000.000/0001-00" error={errors.cnpj} />
-                  </div>
-
-                  <div className="rounded-[28px] border border-[#ecebe5] bg-[#fafaf7] p-4 sm:p-5">
-                    <p className="text-sm font-semibold text-[#111111]">Domínio institucional</p>
-                    <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-                      <Input
-                        value={form.domain}
-                        onChange={(e) => {
-                          setDomainState(null);
-                          setFieldError("domain");
-                          setForm((prev) => ({ ...prev, domain: e.target.value }));
-                        }}
-                        placeholder="tavarestransporte.com.br"
-                        className={cn(
-                          "h-12 rounded-2xl border-[#e6e1db] bg-white px-4",
-                          errors.domain && "border-destructive",
-                        )}
-                      />
-                      <Button type="button" onClick={() => void handleCheckDomain()} disabled={checkingDomain} className="h-12 rounded-2xl bg-[#111111] px-5 text-white hover:bg-[#222222]">
-                        {checkingDomain ? "Validando..." : "Validar domínio"}
-                      </Button>
-                    </div>
-
-                    {domainState && (
-                      <div className="mt-4 space-y-3">
-                        <p className={`text-sm ${domainState.available ? "text-[#17803d]" : "text-[#b54708]"}`}>
-                          {domainState.available
-                            ? `Domínio liberado: ${domainState.normalizedDomain}`
-                            : domainState.message}
-                        </p>
-
-                        {!domainState.available && domainState.suggestions.length > 0 && (
-                          <div className="flex flex-wrap gap-2">
-                            {domainState.suggestions.map((suggestion) => (
-                              <button
-                                key={suggestion}
-                                type="button"
-                                onClick={() => {
-                                  setForm((prev) => ({ ...prev, domain: suggestion }));
-                                  void handleCheckDomain(suggestion);
-                                }}
-                                className="rounded-full border border-[#ffd8c1] bg-white px-3 py-1.5 text-sm text-[#7a4a29] transition hover:bg-[#fff4ed]"
-                              >
-                                {suggestion}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {errors.domain && <FieldError message={errors.domain} />}
-                  </div>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <Field label="Nome da empresa" placeholder="Tavares Transporte" value={form.companyName} onChange={(e) => updateField("companyName", e.target.value)} error={errors.companyName} />
+                  <Field label="Responsável" placeholder="Nome completo" value={form.contactName} onChange={(e) => updateField("contactName", e.target.value)} error={errors.contactName} />
+                  <Field label="Celular" placeholder="(11) 99999-0000" inputMode="tel" value={form.phone} onChange={(e) => updateField("phone", e.target.value)} error={errors.phone} />
+                  <Field label="CNPJ" placeholder="00.000.000/0001-00" inputMode="numeric" value={form.cnpj} onChange={(e) => updateField("cnpj", e.target.value)} error={errors.cnpj} />
                 </div>
-              )}
 
-              {currentStep === 2 && (
-                <div className="space-y-6">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7a7a74]">
-                      Verificação
-                    </p>
-                    <h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em]">
-                      Confirme o celular da operação.
-                    </h1>
-                    <p className="mt-4 max-w-2xl text-base leading-8 text-[#5f5f5a]">
-                      Antes de liberar o ambiente, confirmamos o número principal da empresa.
-                    </p>
+                <div className="space-y-2">
+                  <label
+                    htmlFor="company-domain"
+                    className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#111111]/55 dark:text-[#f4f4f4]/55"
+                  >
+                    Domínio institucional
+                  </label>
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <input
+                      id="company-domain"
+                      value={form.domain}
+                      onChange={(e) => {
+                        setDomainState(null);
+                        setFieldError("domain");
+                        setForm((prev) => ({ ...prev, domain: e.target.value }));
+                      }}
+                      placeholder="tavarestransporte.com.br"
+                      autoCapitalize="none"
+                      className={cn(
+                        fieldInputClass,
+                        errors.domain ? fieldErrorBorderClass : fieldBorderClass,
+                      )}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleCheckDomain()}
+                      disabled={checkingDomain}
+                      className={`${secondaryButtonClass} shrink-0`}
+                    >
+                      {checkingDomain ? <Spinner /> : null}
+                      {checkingDomain ? "Validando…" : "Validar domínio"}
+                    </button>
                   </div>
 
-                  <div className="rounded-[30px] border border-[#ecebe5] bg-[#fafaf7] p-5">
-                    <p className="text-sm font-medium text-[#111111]">
-                      Celular informado: <strong>{form.phone}</strong>
-                    </p>
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-                      <Button type="button" onClick={() => void handleSendSms()} disabled={sendingSms} className="h-12 rounded-2xl bg-[#ff5c00] px-5 text-white hover:bg-[#eb5600]">
-                        {sendingSms ? "Enviando..." : smsSent ? "Reenviar código" : "Enviar código"}
-                      </Button>
-                      <Input
+                  <FieldMessage
+                    error={errors.domain}
+                    hint={
+                      domainState?.available
+                        ? `Domínio liberado: ${domainState.normalizedDomain}`
+                        : undefined
+                    }
+                  />
+
+                  <AnimatePresence>
+                    {domainState && !domainState.available && domainState.suggestions.length > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="flex flex-wrap gap-2 pt-1"
+                      >
+                        {domainState.suggestions.map((suggestion) => (
+                          <button
+                            key={suggestion}
+                            type="button"
+                            onClick={() => {
+                              setForm((prev) => ({ ...prev, domain: suggestion }));
+                              void handleCheckDomain(suggestion);
+                            }}
+                            className="cursor-pointer rounded-full border border-black/15 px-3 py-1.5 font-mono text-xs transition hover:border-[#ff5c00] hover:text-[#ff5c00] dark:border-white/20"
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </motion.section>
+            )}
+
+            {currentStep === 2 && (
+              <motion.section key="step-2" {...stepMotion} className="space-y-8">
+                <StepHeader
+                  eyebrow="02 · Verificação"
+                  title="Confirme o celular da operação."
+                  text="Antes de liberar o ambiente, confirmamos o número principal da empresa."
+                />
+
+                <div className="rounded-2xl border border-black/10 p-5 dark:border-white/10">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#111111]/55 dark:text-[#f4f4f4]/55">
+                    celular informado
+                  </p>
+                  <p className="mt-1 font-mono text-lg">{form.phone}</p>
+
+                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <button
+                      type="button"
+                      onClick={() => void handleSendSms()}
+                      disabled={sendingSms}
+                      className={cn(
+                        smsSent ? secondaryButtonClass : primaryButtonClass,
+                        "shrink-0",
+                      )}
+                    >
+                      {sendingSms ? <Spinner /> : null}
+                      {sendingSms ? "Enviando…" : smsSent ? "Reenviar código" : "Enviar código"}
+                    </button>
+
+                    <div className="flex-1">
+                      <input
                         value={smsCode}
                         onChange={(e) => {
                           setSmsCode(e.target.value);
                           setFieldError("smsCode");
                         }}
-                        placeholder="Digite os 6 dígitos"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="000000"
+                        aria-label="Código de 6 dígitos"
                         className={cn(
-                          "h-12 rounded-2xl border-[#e6e1db] bg-white px-4 sm:max-w-xs",
-                          errors.smsCode && "border-destructive",
+                          fieldInputClass,
+                          "font-mono text-lg tracking-[0.4em] placeholder:tracking-[0.4em]",
+                          errors.smsCode ? fieldErrorBorderClass : fieldBorderClass,
                         )}
                       />
-                      <Button type="button" onClick={() => void handleVerifySms()} disabled={verifyingSms || !smsSent} className="h-12 rounded-2xl border border-[#deded7] bg-white px-5 text-[#1f1f1c] hover:bg-[#fafaf7]">
-                        {verifyingSms ? "Validando..." : "Confirmar"}
-                      </Button>
                     </div>
 
-                    {developmentSmsCode && (
-                      <p className="mt-4 text-sm text-[#7a7068]">
-                        Ambiente local: código de desenvolvimento <strong>{developmentSmsCode}</strong>
-                      </p>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleVerifySms()}
+                      disabled={verifyingSms || !smsSent}
+                      className={`${primaryButtonClass} shrink-0`}
+                    >
+                      {verifyingSms ? <Spinner /> : null}
+                      {verifyingSms ? "Validando…" : "Confirmar"}
+                    </button>
+                  </div>
 
-                    {smsVerified && (
-                      <p className="mt-4 text-sm font-medium text-[#17803d]">
-                        Celular confirmado. Você já pode seguir para o plano.
-                      </p>
-                    )}
-
-                    {errors.smsCode && <FieldError message={errors.smsCode} />}
+                  <div className="mt-3">
+                    <FieldMessage
+                      error={errors.smsCode}
+                      hint={
+                        smsVerified
+                          ? "Celular confirmado. Você já pode seguir para o plano."
+                          : developmentSmsCode
+                            ? `Ambiente local — código de desenvolvimento: ${developmentSmsCode}`
+                            : undefined
+                      }
+                    />
                   </div>
                 </div>
-              )}
+              </motion.section>
+            )}
 
-              {currentStep === 3 && (
-                <div className="space-y-6">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7a7a74]">
-                      Plano
-                    </p>
-                    <h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em]">
-                      Escolha o ritmo ideal para a implantação.
-                    </h1>
-                    <p className="mt-4 max-w-2xl text-base leading-8 text-[#5f5f5a]">
-                      Você pode começar com um plano simples e evoluir depois sem trocar o domínio.
-                    </p>
-                  </div>
+            {currentStep === 3 && (
+              <motion.section key="step-3" {...stepMotion} className="space-y-8">
+                <StepHeader
+                  eyebrow="03 · Plano"
+                  title="Escolha o ritmo da implantação."
+                  text="Dá para começar simples e evoluir depois sem trocar o domínio."
+                />
 
-                  <div className="grid gap-4 xl:grid-cols-3">
-                    {plans.map((plan) => (
+                <div className="grid gap-3">
+                  {plans.map((plan) => {
+                    const selected = form.plan === plan.id;
+                    return (
                       <button
                         key={plan.id}
                         type="button"
                         onClick={() => setForm((prev) => ({ ...prev, plan: plan.id }))}
-                        className={`rounded-[30px] border p-5 text-left transition ${
-                          form.plan === plan.id
-                            ? "border-[#ff5c00] bg-[#fff5ef] shadow-[0_18px_50px_rgba(255,92,0,0.10)]"
-                            : "border-[#ecebe5] bg-[#fafaf7] hover:border-[#d7d5ce]"
-                        }`}
+                        aria-pressed={selected}
+                        className={cn(
+                          "relative cursor-pointer rounded-2xl border p-5 text-left transition-colors",
+                          selected
+                            ? "border-[#ff5c00]"
+                            : "border-black/10 hover:border-black/30 dark:border-white/10 dark:hover:border-white/30",
+                        )}
                       >
-                        <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#84847f]">
-                          {plan.name}
-                        </p>
-                        <p className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-[#111111]">
-                          {plan.price}
-                        </p>
-                        <p className="mt-3 text-sm leading-7 text-[#5f5f5a]">
+                        {selected && (
+                          <motion.span
+                            layoutId="plan-glow"
+                            className="absolute inset-0 rounded-2xl bg-[#ff5c00]/[0.06]"
+                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                          />
+                        )}
+                        <div className="relative flex flex-wrap items-baseline justify-between gap-3">
+                          <span className="flex items-center gap-3">
+                            <span
+                              className={cn(
+                                "flex size-5 items-center justify-center rounded-full border",
+                                selected
+                                  ? "border-[#ff5c00] bg-[#ff5c00] text-white"
+                                  : "border-black/25 dark:border-white/25",
+                              )}
+                            >
+                              {selected && <Check className="size-3" />}
+                            </span>
+                            <span className="text-lg font-semibold tracking-[-0.02em]">
+                              {plan.name}
+                            </span>
+                          </span>
+                          <span className="font-mono text-sm">
+                            {plan.price}
+                            <span className="text-[#111111]/45 dark:text-[#f4f4f4]/45">
+                              {plan.period}
+                            </span>
+                          </span>
+                        </div>
+                        <p className="relative mt-2 pl-8 text-sm leading-6 text-[#111111]/60 dark:text-[#f4f4f4]/60">
                           {plan.description}
                         </p>
-                        <div className="mt-4 space-y-2">
-                          {plan.features.map((feature) => (
-                            <div key={feature} className="flex items-center gap-2 text-sm text-[#30302d]">
-                              <CheckCircle2 className="size-4 text-[#17803d]" />
-                              {feature}
-                            </div>
-                          ))}
-                        </div>
+                        <p className="relative mt-2 pl-8 font-mono text-[11px] text-[#111111]/50 dark:text-[#f4f4f4]/50">
+                          {plan.features.join(" · ")}
+                        </p>
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              )}
-
-              {currentStep === 4 && (
-                <div className="space-y-6">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7a7a74]">
-                      Acesso inicial
-                    </p>
-                    <h1 className="mt-3 text-4xl font-semibold tracking-[-0.05em]">
-                      Crie o administrador da empresa.
-                    </h1>
-                    <p className="mt-4 max-w-2xl text-base leading-8 text-[#5f5f5a]">
-                      Esse será o primeiro acesso para entrar no painel, cadastrar alunos e depois liberar os usuários derivados desses alunos.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Nome do administrador" value={form.adminName} onChange={(value) => { setForm((prev) => ({ ...prev, adminName: value })); setFieldError("adminName"); }} placeholder="Caique Alves" error={errors.adminName} />
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-[#30302d]">
-                        Login do administrador
-                      </label>
-                      <div className={cn("flex min-h-12 items-center rounded-2xl border border-[#e6e1db] bg-white px-4", errors.adminLogin && "border-destructive")}>
-                        <input
-                          value={form.adminLogin}
-                          onChange={(e) => { setForm((prev) => ({ ...prev, adminLogin: e.target.value })); setFieldError("adminLogin"); }}
-                          placeholder="caique.alves"
-                          className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none"
-                        />
-                        {(domainState?.normalizedDomain || form.domain) && (
-                          <span
-                            className="max-w-[48%] shrink-0 truncate pl-3 text-sm text-[#7a7068] sm:max-w-[55%]"
-                            title={`@${domainState?.normalizedDomain ?? form.domain.replace(/^@+/, "")}`}
-                          >
-                            @{domainState?.normalizedDomain ?? form.domain.replace(/^@+/, "")}
-                          </span>
-                        )}
-                      </div>
-                      {errors.adminLogin && <FieldError message={errors.adminLogin} />}
-                    </div>
-                    <Field label="Senha" type="password" value={form.password} onChange={(value) => { setForm((prev) => ({ ...prev, password: value })); setFieldError("password"); }} placeholder="Mínimo de 6 caracteres" error={errors.password} />
-                    <Field label="Confirmar senha" type="password" value={form.confirmPassword} onChange={(value) => { setForm((prev) => ({ ...prev, confirmPassword: value })); setFieldError("confirmPassword"); }} placeholder="Repita a senha" error={errors.confirmPassword} />
-                  </div>
-
-                  <div className="rounded-[28px] border border-[#ecebe5] bg-[#fafaf7] p-5">
-                    <p className="text-sm font-semibold text-[#111111]">Acesso que será criado</p>
-                    <p className="mt-2 break-all text-base font-semibold text-[#111111]">
-                      {adminEmailPreview || "Defina o login do administrador"}
-                    </p>
-                    <p className="mt-2 text-sm text-[#5f5f5a]">
-                      Depois de entrar, você poderá cadastrar alunos com o domínio da empresa e criar usuários de aluno a partir desses cadastros.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-8 flex flex-col gap-3 border-t border-black/6 pt-6 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-[#666661]">
-                Etapa {currentStep} de {steps.length}
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row">
-                {currentStep > 1 && currentStep < 4 && (
-                  <Button type="button" variant="outline" onClick={() => setCurrentStep((prev) => Math.max(1, prev - 1))} className="h-12 rounded-2xl px-5">
-                    Voltar
-                  </Button>
-                )}
-
-                {currentStep < 4 ? (
-                  <Button type="button" onClick={() => void handleNextStep()} className="h-12 rounded-2xl bg-[#ff5c00] px-5 text-white hover:bg-[#eb5600]">
-                    Continuar
-                    <ChevronRight className="size-4" />
-                  </Button>
-                ) : (
-                  <Button type="button" onClick={() => void handleSubmit()} disabled={submitting} className="h-12 rounded-2xl bg-[#ff5c00] px-5 text-white hover:bg-[#eb5600]">
-                    {submitting ? "Concluindo..." : "Concluir cadastro"}
-                    <ArrowRight className="size-4" />
-                  </Button>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <aside className="space-y-3">
-            <Card className="rounded-[32px] border-white/80 bg-white/80 shadow-[0_20px_55px_rgba(15,23,42,0.07)] backdrop-blur-2xl">
-              <CardHeader>
-                <CardTitle className="text-xl font-semibold tracking-[-0.04em] text-[#111111]">
-                  Resumo rápido
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 pt-0 text-sm text-[#5f5f5a]">
-                <CompactRow label="Empresa" value={form.companyName || "A definir"} />
-                <CompactRow label="Domínio" value={domainState?.normalizedDomain || form.domain || "A definir"} />
-                <CompactRow label="Plano" value={selectedPlan.name} />
-                <CompactRow label="Admin" value={adminEmailPreview || "A definir"} />
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-[32px] border-white/80 bg-[linear-gradient(180deg,rgba(255,245,238,0.96),rgba(255,255,255,0.88))] shadow-[0_20px_55px_rgba(255,92,0,0.08)]">
-              <CardContent className="space-y-3 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#a05722]">
-                  Depois do cadastro
-                </p>
-                <p className="text-sm leading-6 text-[#6a574b]">
-                  O aluno nasce com este domínio e o usuário dele é liberado a partir desse cadastro.
-                </p>
-                <p className="text-sm leading-6 text-[#6a574b]">
-                  Isso evita conflito entre empresas mesmo quando o login se repete.
-                </p>
-              </CardContent>
-            </Card>
-            {Object.values(errors).some(Boolean) && (
-              <Card className="rounded-[32px] border-[#ffd9c6] bg-[#fff8f4] shadow-none">
-                <CardContent className="flex items-start gap-3 p-5">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0 text-[#c2410c]" />
-                  <p className="text-sm leading-6 text-[#8a4b23]">
-                    Existem campos que ainda precisam de ajuste nesta etapa.
-                  </p>
-                </CardContent>
-              </Card>
+              </motion.section>
             )}
-          </aside>
+
+            {currentStep === 4 && (
+              <motion.section key="step-4" {...stepMotion} className="space-y-8">
+                <StepHeader
+                  eyebrow="04 · Acesso"
+                  title="Crie o administrador da empresa."
+                  text="É o primeiro acesso ao painel — quem vai cadastrar alunos e liberar os demais usuários."
+                />
+
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <Field label="Nome do administrador" placeholder="Nome completo" value={form.adminName} onChange={(e) => updateField("adminName", e.target.value)} error={errors.adminName} autoComplete="name" />
+
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="admin-login"
+                      className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#111111]/55 dark:text-[#f4f4f4]/55"
+                    >
+                      Login do administrador
+                    </label>
+                    <div
+                      className={cn(
+                        "flex h-12 items-center rounded-xl border bg-white px-4 transition focus-within:border-[#ff5c00] focus-within:ring-4 focus-within:ring-[#ff5c00]/10 dark:bg-[#141416]",
+                        errors.adminLogin ? fieldErrorBorderClass : fieldBorderClass,
+                      )}
+                    >
+                      <input
+                        id="admin-login"
+                        value={form.adminLogin}
+                        onChange={(e) => updateField("adminLogin", e.target.value)}
+                        placeholder="nome.sobrenome"
+                        autoCapitalize="none"
+                        autoComplete="username"
+                        className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#111111]/35 dark:placeholder:text-[#f4f4f4]/30"
+                      />
+                      {normalizedDomainPreview && (
+                        <span
+                          className="max-w-[55%] shrink-0 truncate pl-2 font-mono text-xs text-[#111111]/50 dark:text-[#f4f4f4]/50"
+                          title={`@${normalizedDomainPreview}`}
+                        >
+                          @{normalizedDomainPreview}
+                        </span>
+                      )}
+                    </div>
+                    <FieldMessage error={errors.adminLogin} />
+                  </div>
+
+                  <Field
+                    label="Senha"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Mínimo de 6 caracteres"
+                    autoComplete="new-password"
+                    value={form.password}
+                    onChange={(e) => updateField("password", e.target.value)}
+                    error={errors.password}
+                    trailing={
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((value) => !value)}
+                        aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                        className="flex size-9 cursor-pointer items-center justify-center rounded-full text-[#111111]/45 transition hover:text-[#111111] dark:text-[#f4f4f4]/45 dark:hover:text-[#f4f4f4]"
+                      >
+                        {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    }
+                  />
+                  <Field
+                    label="Confirmar senha"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Repita a senha"
+                    autoComplete="new-password"
+                    value={form.confirmPassword}
+                    onChange={(e) => updateField("confirmPassword", e.target.value)}
+                    error={errors.confirmPassword}
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-black/10 p-5 dark:border-white/10">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#111111]/55 dark:text-[#f4f4f4]/55">
+                    acesso que será criado
+                  </p>
+                  <p className="mt-2 break-all font-mono text-base">
+                    {adminEmailPreview || "defina o login do administrador"}
+                  </p>
+                </div>
+              </motion.section>
+            )}
+          </AnimatePresence>
+
+          <div className="mt-10 flex flex-col-reverse gap-3 border-t border-black/10 pt-6 sm:flex-row sm:items-center sm:justify-between dark:border-white/10">
+            <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#111111]/45 dark:text-[#f4f4f4]/45">
+              etapa {currentStep} de {steps.length}
+            </span>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              {currentStep > 1 && currentStep < 4 && (
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep((prev) => Math.max(1, prev - 1))}
+                  className={secondaryButtonClass}
+                >
+                  <ArrowLeft className="size-4" />
+                  Voltar
+                </button>
+              )}
+
+              {currentStep < 4 ? (
+                <button
+                  type="button"
+                  onClick={() => void handleNextStep()}
+                  disabled={checkingDomain}
+                  className={primaryButtonClass}
+                >
+                  {checkingDomain ? <Spinner /> : null}
+                  Continuar
+                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleSubmit()}
+                  disabled={submitting}
+                  className={primaryButtonClass}
+                >
+                  {submitting ? <Spinner /> : null}
+                  {submitting ? "Concluindo…" : "Concluir cadastro"}
+                  {!submitting && (
+                    <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+
+        <aside className="hidden lg:block">
+          <div className="sticky top-24">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#111111]/45 dark:text-[#f4f4f4]/45">
+              resumo
+            </p>
+            <dl className="mt-4 divide-y divide-black/10 border-y border-black/10 text-sm dark:divide-white/10 dark:border-white/10">
+              <SummaryRow label="empresa" value={form.companyName} />
+              <SummaryRow label="domínio" value={domainState?.normalizedDomain || form.domain} />
+              <SummaryRow label="plano" value={selectedPlan.name} />
+              <SummaryRow label="admin" value={adminEmailPreview} />
+            </dl>
+
+            <AnimatePresence>
+              {hasErrors && (
+                <motion.p
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="mt-6 flex items-start gap-2 text-xs leading-5 text-red-600 dark:text-red-400"
+                >
+                  <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+                  Existem campos que ainda precisam de ajuste nesta etapa.
+                </motion.p>
+              )}
+            </AnimatePresence>
+
+            <p className="mt-8 text-xs leading-6 text-[#111111]/50 dark:text-[#f4f4f4]/50">
+              Depois do cadastro, alunos nascem com este domínio e os acessos deles
+              são criados a partir do cadastro — sem conflito entre empresas, mesmo
+              quando o login se repete.
+            </p>
+          </div>
+        </aside>
       </div>
-    </main>
+    </AuthShell>
   );
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  error,
+function StepHeader({
+  eyebrow,
+  title,
+  text,
 }: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  type?: string;
-  error?: string;
+  eyebrow: string;
+  title: string;
+  text: string;
 }) {
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium text-[#30302d]">{label}</label>
-      <Input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={cn(
-          "h-12 rounded-2xl border-[#e6e1db] bg-white px-4",
-          error && "border-destructive",
-        )}
-      />
-      {error && <FieldError message={error} />}
+    <div>
+      <p className="font-mono text-xs uppercase tracking-[0.22em] text-[#ff5c00]">
+        {eyebrow}
+      </p>
+      <h1 className="mt-4 max-w-xl text-3xl font-semibold leading-[1.1] tracking-[-0.03em] sm:text-4xl">
+        {title}
+      </h1>
+      <p className="mt-4 max-w-xl text-sm leading-7 text-[#111111]/60 dark:text-[#f4f4f4]/60">
+        {text}
+      </p>
     </div>
   );
 }
 
-function FieldError({ message }: { message: string }) {
-  return <p className="text-sm text-destructive">{message}</p>;
-}
-
-function CompactRow({ label, value }: { label: string; value: string }) {
+function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[#f0efe9] bg-[#fafaf7] px-4 py-3">
-      <p className="text-xs uppercase tracking-[0.14em] text-[#8b8b85]">{label}</p>
-      <p className="mt-1 break-all text-sm font-medium text-[#111111]">{value}</p>
+    <div className="py-3">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#111111]/45 dark:text-[#f4f4f4]/45">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          "mt-1 break-all transition-colors",
+          !value && "text-[#111111]/35 dark:text-[#f4f4f4]/35",
+        )}
+      >
+        {value || "a definir"}
+      </dd>
     </div>
   );
 }

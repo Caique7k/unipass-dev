@@ -225,6 +225,17 @@
   animation: loginBreath 10s ease-in-out infinite;
 }
 
+@keyframes unipassRfidPulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
 @keyframes unipassFloatSlow {
   0%, 100% {
     transform: translate3d(0, 0, 0);
@@ -278,6 +289,7 @@
   .unipass-float-slow,
   .unipass-float-medium,
   .unipass-glow-drift,
+  .unipass-bus-halo,
   .login-intro,
   .login-breath,
   .login-breath-fast,
@@ -304,4 +316,20 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
+}
+.unipass-bus-halo {
+  animation: unipassBusHalo 2.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes unipassBusHalo {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.18;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.05;
+  }
 }
