@@ -15,7 +15,7 @@ export class DashboardController {
   async getDashboard(@Req() req: any) {
     const companyId = req.user.companyId;
 
-    return this.dashboardService.getMetrics(companyId);
+    return this.dashboardService.getMetrics(companyId, req.user.role);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

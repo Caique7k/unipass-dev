@@ -1,79 +1,157 @@
 "use client";
 
-import { Menu, Moon, Sun } from "lucide-react";
-import { useSidebar } from "@/app/contexts/SidebarContext";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
+import { usePathname } from "next/navigation";
+import { AnimatePresence, motion } from "motion/react";
+import { ChevronRight, Moon, PanelLeft, Search, Sun } from "lucide-react";
+import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useTheme } from "@/app/contexts/ThemeContext";
+import { roleLabels } from "@/lib/permissions";
+import { buildNavGroups, findActiveItem } from "./nav";
+import { CommandPalette } from "./CommandPalette";
+import { ACCENT, spring } from "./components/primitives";
 
 export default function Topbar() {
-  const { toggle } = useSidebar();
+  const { isOpen, toggle } = useSidebar();
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const pathname = usePathname();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
   const homeHref =
     user?.role === "PLATFORM_ADMIN" ? "/dashboard/companies" : "/dashboard";
 
+  const active = useMemo(
+    () => findActiveItem(buildNavGroups(user?.role), pathname),
+    [user?.role, pathname],
+  );
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((prev) => !prev);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
-    <header className="sticky top-0 z-30 h-18 bg-background/85 px-4 md:px-6 backdrop-blur-xl">
-      <div className="relative flex h-full items-center justify-between gap-3 md:gap-4">
-        <button
-          onClick={toggle}
-          className="inline-flex h-10 w-10 md:h-11 md:w-11 items-center justify-center rounded-2xl border border-border/60 bg-card/80 text-foreground transition hover:-translate-y-0.5 hover:bg-accent cursor-pointer"
-        >
-          <Menu size={20} />
-        </button>
-
-        <div className="absolute left-1/2 -translate-x-1/2">
-          <Link
-            href={homeHref}
-            className="flex cursor-pointer items-center gap-2 rounded-[24px] px-3 py-2 backdrop-blur md:gap-3 md:px-4 md:py-2.5"
-          >
-            <div className="flex h-9 w-9 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-2xl">
-              <Image
-                src="/logo_unipass.svg"
-                alt="UniPass Logo"
-                width={24}
-                height={24}
-              />
-            </div>
-            <div className="min-w-0 leading-tight pr-1">
-              <p className="hidden sm:block text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                Plataforma
-              </p>
-              <span className="block truncate text-base md:text-lg font-bold text-[#ff5c00]">
-                UniPass
-              </span>
-            </div>
-          </Link>
-        </div>
-
-        <div className="ml-auto flex items-center gap-3">
+    <>
+      <header className="sticky top-0 z-30 h-16 shrink-0 border-b border-border/50 bg-background/80 px-3 backdrop-blur-xl md:px-5">
+        <div className="flex h-full items-center gap-3">
           <button
-            onClick={toggleTheme}
-            className="inline-flex h-10 md:h-11 items-center gap-2 rounded-2xl border border-border/60 bg-card/80 px-3 md:px-4 text-sm font-medium text-foreground transition hover:-translate-y-0.5 hover:bg-accent cursor-pointer"
+            onClick={toggle}
+            aria-label={isOpen ? "Recolher menu" : "Expandir menu"}
+            className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-border/60 text-muted-foreground transition hover:bg-accent hover:text-foreground"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#ff5c00]/12 text-[#ff5c00]">
-              {theme === "dark" ? <Moon size={16} /> : <Sun size={16} />}
-            </span>
-            <span className="hidden lg:inline">
-              {theme === "dark" ? "Modo escuro" : "Modo claro"}
-            </span>
+            <motion.span
+              animate={{ rotate: isOpen ? 0 : 180 }}
+              transition={spring}
+              className="flex"
+            >
+              <PanelLeft size={16} />
+            </motion.span>
           </button>
 
-          <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-border/60 bg-card/80 px-2.5 py-1.5 shadow-sm">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ff5c00] text-xs font-bold text-white">
-              {user?.name?.charAt(0)}
-            </div>
-            <div className="max-w-[140px] leading-tight">
-              <p className="truncate text-xs font-semibold">{user?.name}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {user?.email}
-              </p>
+          {/* Trilha: UniPass › Grupo › Página */}
+          <nav
+            aria-label="Trilha de navegação"
+            className="flex min-w-0 items-center gap-1.5 text-sm"
+          >
+            <Link
+              href={homeHref}
+              className="shrink-0 font-semibold transition hover:opacity-80"
+              style={{ color: ACCENT }}
+            >
+              UniPass
+            </Link>
+
+            <AnimatePresence mode="wait">
+              {active && (
+                <motion.span
+                  key={active.item.href}
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 4 }}
+                  transition={{ duration: 0.18 }}
+                  className="flex min-w-0 items-center gap-1.5"
+                >
+                  <ChevronRight
+                    size={13}
+                    className="shrink-0 text-muted-foreground/60"
+                  />
+                  <span className="hidden shrink-0 text-muted-foreground sm:inline">
+                    {active.group.label}
+                  </span>
+                  <ChevronRight
+                    size={13}
+                    className="hidden shrink-0 text-muted-foreground/60 sm:block"
+                  />
+                  <span className="truncate font-medium">
+                    {active.item.label}
+                  </span>
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </nav>
+
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setPaletteOpen(true)}
+              className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl border border-border/60 px-2.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            >
+              <Search size={14} />
+              <span className="hidden lg:inline">Buscar</span>
+              <kbd className="hidden rounded border border-border/70 px-1 py-0.5 text-[10px] lg:block">
+                Ctrl K
+              </kbd>
+            </button>
+
+            <button
+              onClick={toggleTheme}
+              aria-label={
+                theme === "dark" ? "Usar modo claro" : "Usar modo escuro"
+              }
+              className="relative inline-flex h-9 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-border/60 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            >
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.span
+                  key={theme}
+                  initial={{ y: 14, opacity: 0, rotate: -30 }}
+                  animate={{ y: 0, opacity: 1, rotate: 0 }}
+                  exit={{ y: -14, opacity: 0, rotate: 30 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex"
+                >
+                  {theme === "dark" ? <Moon size={15} /> : <Sun size={15} />}
+                </motion.span>
+              </AnimatePresence>
+            </button>
+
+            <div className="flex items-center gap-2 rounded-xl border border-border/60 px-2 py-1.5">
+              <span
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
+                style={{ backgroundColor: ACCENT }}
+              >
+                {user?.name?.charAt(0)?.toUpperCase()}
+              </span>
+              <div className="hidden max-w-[150px] leading-tight lg:block">
+                <p className="truncate text-xs font-medium">{user?.name}</p>
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {user?.role ? roleLabels[user.role] : ""}
+                </p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+    </>
   );
 }

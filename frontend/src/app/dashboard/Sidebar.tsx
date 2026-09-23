@@ -1,307 +1,231 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Link from "next/link";
-import {
-  BookUserIcon,
-  Building2,
-  ClipboardList,
-  Compass,
-  FileBarChart2,
-  FileText,
-  Home,
-  Layers3,
-  LogOut,
-  Route,
-  Smartphone,
-  SmartphoneNfcIcon,
-  Truck,
-  Users,
-  Wallet,
-} from "lucide-react";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import { ChevronDown, LogOut } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useAuth } from "@/app/contexts/AuthContext";
-import { hasRole } from "@/lib/permissions";
+import { roleLabels } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
+import { buildNavGroups, isItemActive, type NavItem } from "./nav";
+import { ACCENT, spring } from "./components/primitives";
 
 export default function Sidebar() {
   const pathname = usePathname();
   const { isOpen } = useSidebar();
   const { user, loading, logout } = useAuth();
-  const canManageCompany = hasRole(user?.role, ["ADMIN"]);
-  const canViewOperations = hasRole(user?.role, [
-    "ADMIN",
-    "DRIVER",
-    "COORDINATOR",
-  ]);
-  const isPlatformAdmin = hasRole(user?.role, ["PLATFORM_ADMIN"]);
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+
+  const groups = useMemo(() => buildNavGroups(user?.role), [user?.role]);
+
+  function toggleGroup(id: string) {
+    setCollapsedGroups((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  }
 
   return (
-    <aside
-      className={`
-        unipass-scrollbar flex h-full min-h-0 flex-col overflow-y-auto border-r border-sidebar-border
-        bg-background/85 text-sidebar-foreground shadow-sm backdrop-blur-xl transition-all duration-300
-        ${isOpen ? "w-64" : "w-20"}
-      `}
+    <motion.aside
+      animate={{ width: isOpen ? 264 : 76 }}
+      transition={spring}
+      className="relative z-20 flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar/80 backdrop-blur-xl"
     >
       <div
-        className={`
-          min-h-16 flex items-center
-          ${isOpen ? "justify-start px-3 py-3" : "justify-center"}
-        `}
-      >
-        {loading ? (
-          <span className="h-5 w-24 animate-pulse rounded bg-sidebar-accent" />
-        ) : (
-          user &&
-          (isOpen ? (
-            <div className="flex w-full items-center gap-3 rounded-2xl bg-sidebar-accent/80 px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                  Bem-vindo
-                </p>
-                <p className="truncate text-sm font-semibold">{user.name}</p>
-              </div>
-            </div>
-          ) : (
-            <div />
-          ))
+        className={cn(
+          "flex min-h-16 shrink-0 items-center gap-2.5 px-3",
+          !isOpen && "justify-center px-0",
         )}
+      >
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl"
+          style={{ backgroundColor: `${ACCENT}14` }}
+        >
+          <Image
+            src="/logo_unipass.svg"
+            alt=""
+            width={20}
+            height={20}
+            aria-hidden
+          />
+        </span>
+
+        <AnimatePresence initial={false}>
+          {isOpen && (
+            <motion.div
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -6 }}
+              className="min-w-0 leading-tight"
+            >
+              {loading ? (
+                <span className="block h-4 w-24 animate-pulse rounded bg-sidebar-accent" />
+              ) : (
+                <>
+                  <p className="truncate text-sm font-semibold">
+                    {user?.companyName ?? "UniPass"}
+                  </p>
+                  <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    {user?.role ? roleLabels[user.role] : ""}
+                  </p>
+                </>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      <nav className="flex-1 space-y-6 p-2">
-        <div>
-          {isOpen && (
-            <p className="mb-2 text-xs uppercase text-muted-foreground">
-              Principal
-            </p>
-          )}
+      <LayoutGroup id="sidebar-nav">
+        <nav className="unipass-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-2 pb-2">
+          {groups.map((group) => {
+            const collapsed = isOpen && collapsedGroups.includes(group.id);
+            const hasActive = group.items.some((item) =>
+              isItemActive(item, pathname),
+            );
 
-          {isPlatformAdmin ? (
-            <SidebarItem
-              href="/dashboard/companies"
-              icon={<Home size={25} />}
-              label="Empresas"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/companies"}
-            />
-          ) : (
-            <SidebarItem
-              href="/dashboard"
-              icon={<Home size={25} />}
-              label="Dashboard"
-              isOpen={isOpen}
-              active={pathname === "/dashboard"}
-            />
-          )}
-        </div>
+            return (
+              <div key={group.id} className="pt-2">
+                {isOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition hover:text-foreground"
+                  >
+                    {group.label}
+                    <motion.span
+                      animate={{ rotate: collapsed ? -90 : 0 }}
+                      transition={spring}
+                    >
+                      <ChevronDown size={12} />
+                    </motion.span>
+                  </button>
+                ) : (
+                  <div
+                    aria-hidden
+                    className="mx-auto my-2 h-px w-8 bg-sidebar-border"
+                  />
+                )}
 
-        <div>
-          {isOpen && (
-            <p className="mb-2 text-xs uppercase text-muted-foreground">
-              Aplicativo
-            </p>
-          )}
+                <AnimatePresence initial={false}>
+                  {!collapsed && (
+                    <motion.ul
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                      className="mt-1 space-y-0.5 overflow-hidden"
+                    >
+                      {group.items.map((item) => (
+                        <li key={item.href}>
+                          <SidebarLink
+                            item={item}
+                            isOpen={isOpen}
+                            active={isItemActive(item, pathname)}
+                          />
+                        </li>
+                      ))}
+                    </motion.ul>
+                  )}
+                </AnimatePresence>
 
-          <SidebarItem
-            href="/dashboard/app"
-            icon={<Smartphone size={25} />}
-            label="Aplicativo"
-            isOpen={isOpen}
-            active={pathname === "/dashboard/app"}
-          />
-        </div>
+                {/* Com o grupo fechado, um traço lembra que há algo ativo dentro. */}
+                {collapsed && hasActive && (
+                  <div
+                    aria-hidden
+                    className="mx-3 mt-1 h-0.5 rounded-full"
+                    style={{ backgroundColor: ACCENT }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </nav>
+      </LayoutGroup>
 
-        {!isPlatformAdmin && (
-          <div>
-            {isOpen && (
-              <p className="mb-2 text-xs uppercase text-muted-foreground">
-                Financeiro
-              </p>
-            )}
-
-            {canViewOperations && (
-              <SidebarItem
-                href="/dashboard/billing-groups"
-                icon={<FileText size={25} />}
-                label="Grupos de boletos"
-                isOpen={isOpen}
-                active={pathname === "/dashboard/billing-groups"}
-              />
-            )}
-
-            <SidebarItem
-              href="/dashboard/billing"
-              icon={<Wallet size={25} />}
-              label="Boletos"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/billing"}
-            />
-          </div>
-        )}
-
-        {canViewOperations && (
-          <div>
-            {isOpen && (
-              <p className="mb-2 text-xs uppercase text-muted-foreground">
-                Localização
-              </p>
-            )}
-
-            <SidebarItem
-              href="/dashboard/location"
-              icon={<Compass size={25} />}
-              label="Localização"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/location"}
-            />
-          </div>
-        )}
-
-        {canViewOperations && (
-          <div>
-            {isOpen && (
-              <p className="mb-2 text-xs uppercase text-muted-foreground">
-                Gestão
-              </p>
-            )}
-
-            <SidebarItem
-              href="/dashboard/boarding"
-              icon={<ClipboardList size={25} />}
-              label="Embarques"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/boarding"}
-            />
-
-            <SidebarItem
-              href="/dashboard/students"
-              icon={<BookUserIcon size={25} />}
-              label="Alunos"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/students"}
-            />
-
-            <SidebarItem
-              href="/dashboard/groups"
-              icon={<Layers3 size={25} />}
-              label="Grupos"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/groups"}
-            />
-
-            <SidebarItem
-              href="/dashboard/buses"
-              icon={<Truck size={25} />}
-              label="Ônibus"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/buses"}
-            />
-            {canViewOperations && (
-              <SidebarItem
-                href="/dashboard/routes"
-                icon={<Route size={25} />}
-                label="Rotas"
-                isOpen={isOpen}
-                active={
-                  pathname === "/dashboard/routes" ||
-                  pathname.startsWith("/dashboard/routes/")
-                }
-              />
-            )}
-
-            {canManageCompany && (
-              <SidebarItem
-                href="/dashboard/devices"
-                icon={<SmartphoneNfcIcon size={25} />}
-                label="UniHub"
-                isOpen={isOpen}
-                active={pathname === "/dashboard/devices"}
-              />
-            )}
-          </div>
-        )}
-
-        {canManageCompany && (
-          <div>
-            {isOpen && (
-              <p className="mb-2 text-xs uppercase text-muted-foreground">
-                Administração
-              </p>
-            )}
-
-            <SidebarItem
-              href="/dashboard/company"
-              icon={<Building2 size={25} />}
-              label="Empresa"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/company"}
-            />
-
-            <SidebarItem
-              href="/dashboard/users"
-              icon={<Users size={25} />}
-              label="Usuários"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/users"}
-            />
-
-            <SidebarItem
-              href="/dashboard/reports"
-              icon={<FileBarChart2 size={25} />}
-              label="Relatórios"
-              isOpen={isOpen}
-              active={pathname === "/dashboard/reports"}
-            />
-          </div>
-        )}
-      </nav>
-
-      <div className="p-2">
+      <div className="shrink-0 border-t border-sidebar-border p-2">
         <button
           onClick={logout}
-          className={`
-            flex w-full cursor-pointer items-center rounded-lg py-2 text-red-500 transition-all
-            hover:bg-sidebar-accent/80
-            ${isOpen ? "justify-start gap-3 px-3" : "justify-center"}
-          `}
+          title="Sair"
+          className={cn(
+            "flex w-full cursor-pointer items-center rounded-xl py-2 text-sm text-red-500 transition hover:bg-red-500/10",
+            isOpen ? "justify-start gap-3 px-3" : "justify-center",
+          )}
         >
-          <LogOut size={25} />
-          {isOpen && <span>Sair</span>}
+          <LogOut size={18} />
+          <AnimatePresence initial={false}>
+            {isOpen && (
+              <motion.span
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                Sair
+              </motion.span>
+            )}
+          </AnimatePresence>
         </button>
       </div>
-    </aside>
+    </motion.aside>
   );
 }
 
-function SidebarItem({
-  href,
-  icon,
-  label,
+function SidebarLink({
+  item,
   isOpen,
   active,
 }: {
-  href: string;
-  icon: ReactNode;
-  label: string;
+  item: NavItem;
   isOpen: boolean;
   active: boolean;
 }) {
+  const Icon = item.icon;
+
   return (
     <Link
-      href={href}
-      className={`
-        flex cursor-pointer items-center rounded-lg py-2 transition-all
-        ${isOpen ? "justify-start gap-3 px-3" : "justify-center"}
-        ${
-          active
-            ? "bg-[#ff5c00] text-white"
-            : "text-sidebar-foreground hover:bg-sidebar-accent/80"
-        }
-      `}
+      href={item.href}
+      title={isOpen ? undefined : item.label}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "group relative flex items-center rounded-xl py-2 text-sm transition-colors",
+        isOpen ? "justify-start gap-3 px-3" : "justify-center px-0",
+        active
+          ? "text-foreground"
+          : "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-foreground",
+      )}
     >
-      {icon}
-      {isOpen && <span>{label}</span>}
+      {active && (
+        <motion.span
+          layoutId="sidebar-active"
+          transition={spring}
+          className="absolute inset-0 rounded-xl border"
+          style={{
+            backgroundColor: `${ACCENT}16`,
+            borderColor: `${ACCENT}40`,
+          }}
+        />
+      )}
+
+      <span
+        className="relative shrink-0 transition-transform group-hover:scale-110"
+        style={{ color: active ? ACCENT : undefined }}
+      >
+        <Icon size={18} />
+      </span>
+
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.span
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -4 }}
+            className={cn("relative truncate", active && "font-medium")}
+          >
+            {item.label}
+          </motion.span>
+        )}
+      </AnimatePresence>
     </Link>
   );
 }

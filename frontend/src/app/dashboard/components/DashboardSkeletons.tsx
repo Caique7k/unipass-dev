@@ -149,29 +149,27 @@ export function LocationPageSkeleton() {
 
 export function DashboardContentSkeleton() {
   return (
-    <div className="space-y-8">
-      <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="space-y-4">
+      <Skeleton className="h-[220px] rounded-3xl" />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
-          <div
-            key={index}
-            className="rounded-[24px] border border-border/60 bg-card/70 p-6"
-          >
-            <div className="flex items-start justify-between">
-              <div className="space-y-3">
-                <Skeleton className="h-4 w-24 rounded-xl" />
-                <Skeleton className="h-8 w-16 rounded-xl" />
-              </div>
-              <Skeleton className="size-10 rounded-xl" />
-            </div>
-            <Skeleton className="mt-4 h-4 w-28 rounded-xl" />
-          </div>
+          <Skeleton key={index} className="h-[148px] rounded-3xl" />
         ))}
       </div>
 
-      <div className="grid gap-6 grid-cols-1 lg:grid-cols-3 mt-6">
-        <Skeleton className="h-[340px] rounded-[24px] lg:col-span-2" />
-        <Skeleton className="h-[340px] rounded-[24px]" />
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Skeleton className="h-[320px] rounded-3xl lg:col-span-2" />
+        <Skeleton className="h-[320px] rounded-3xl" />
       </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <Skeleton key={index} className="h-[360px] rounded-3xl" />
+        ))}
+      </div>
+
+      <Skeleton className="h-[220px] rounded-3xl" />
     </div>
   );
 }

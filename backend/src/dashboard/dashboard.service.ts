@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventType, Prisma } from '@prisma/client';
+import { EventType, Prisma, ScheduleType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   addDaysToDateKey,
@@ -96,6 +96,152 @@ type DashboardReportResponse = {
   report: DashboardReportPayload;
 };
 
+const METRICS_SERIES_DAYS = 7;
+const METRICS_RECENT_EVENTS = 12;
+const METRICS_UPCOMING_SCHEDULES = 6;
+const DEVICE_ONLINE_THRESHOLD_MS = 45_000;
+
+type MetricsDayBucket = {
+  boardings: number;
+  deboardings: number;
+  denied: number;
+  students: Set<string>;
+};
+
+function createEmptyBucket(): MetricsDayBucket {
+  return {
+    boardings: 0,
+    deboardings: 0,
+    denied: 0,
+    students: new Set<string>(),
+  };
+}
+
+function formatMinutesOfDay(minutesOfDay: number) {
+  const hours = Math.floor(minutesOfDay / 60);
+  const minutes = minutesOfDay % 60;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function formatCents(amountCents: number) {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(amountCents / 100);
+}
+
+export type DashboardMetricDelta = {
+  value: number;
+  previous: number;
+  delta: number;
+  trend: 'up' | 'down' | 'flat';
+};
+
+export type DashboardAlert = {
+  key: string;
+  level: 'info' | 'warning' | 'danger';
+  title: string;
+  description: string;
+  href: string;
+};
+
+export type DashboardBillingSnapshot = {
+  openCount: number;
+  openAmountCents: number;
+  overdueCount: number;
+  overdueAmountCents: number;
+  paidThisMonthCount: number;
+  paidThisMonthAmountCents: number;
+};
+
+export type DashboardLiveDevice = {
+  deviceId: string;
+  name: string | null;
+  code: string | null;
+  busPlate: string | null;
+  lastUpdate: string | null;
+  online: boolean;
+};
+
+export type DashboardUpcomingSchedule = {
+  scheduleId: string;
+  routeName: string;
+  title: string | null;
+  type: ScheduleType;
+  departureMinutes: number;
+  departureLabel: string;
+  minutesUntil: number;
+  busPlate: string | null;
+  studentsCount: number;
+};
+
+export type DashboardRecentEvent = {
+  eventId: string;
+  type: EventType;
+  at: string;
+  studentName: string | null;
+  rfidTag: string | null;
+  busPlate: string | null;
+  deviceLabel: string | null;
+};
+
+export type DashboardSeriesPoint = {
+  date: string;
+  boardings: number;
+  deboardings: number;
+  denied: number;
+  students: number;
+};
+
+export type DashboardMetricsResponse = {
+  generatedAt: string;
+  dateKey: string;
+  timeZone: string;
+  students: {
+    active: number;
+    createdToday: number;
+    transportedToday: number;
+    transportedYesterday: number;
+  };
+  movement: {
+    boardings: DashboardMetricDelta;
+    deboardings: DashboardMetricDelta;
+    denied: DashboardMetricDelta;
+    transported: DashboardMetricDelta;
+    onBoardNow: number;
+  };
+  fleet: {
+    buses: number;
+    busesWithoutDevice: number;
+    capacityTotal: number;
+    occupancyRate: number | null;
+    devices: number;
+    devicesOnline: number;
+    liveDevices: DashboardLiveDevice[];
+  };
+  schedules: {
+    totalToday: number;
+    completed: number;
+    upcoming: DashboardUpcomingSchedule[];
+  };
+  confirmations: {
+    prompts: {
+      pending: number;
+      dispatched: number;
+      answered: number;
+      expired: number;
+      failed: number;
+    };
+    willGo: number;
+    willNotGo: number;
+  };
+  billing: DashboardBillingSnapshot | null;
+  series: DashboardSeriesPoint[];
+  recentEvents: DashboardRecentEvent[];
+  alerts: DashboardAlert[];
+};
+
 const AVAILABLE_REPORTS: DashboardReportCard[] = [
   {
     id: 'boarding',
@@ -141,158 +287,446 @@ export class DashboardService {
     private readonly configService: ConfigService,
   ) {}
 
-  async getMetrics(companyId: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  async getMetrics(
+    companyId: string,
+    role?: string,
+  ): Promise<DashboardMetricsResponse> {
+    const timeZone = this.getTimeZone();
+    const now = new Date();
+    const todayParts = getZonedDateParts(now, timeZone);
+    const todayKey = todayParts.dateKey;
+    const yesterdayKey = addDaysToDateKey(todayKey, -1);
+    const seriesStartKey = addDaysToDateKey(
+      todayKey,
+      -(METRICS_SERIES_DAYS - 1),
+    );
 
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
+    const todayStart = this.parseDateKey(todayKey, false);
+    const todayEnd = this.parseDateKey(todayKey, true);
+    const seriesStart = this.parseDateKey(seriesStartKey, false);
 
-    const activeStudents = await this.prisma.student.count({
-      where: { companyId, active: true },
-    });
-
-    const activeStudentsYesterday = await this.prisma.student.count({
-      where: { companyId, active: true, createdAt: { lte: yesterday } },
-    });
-
-    const changeStudents = activeStudents - activeStudentsYesterday;
-    const trendStudents = changeStudents >= 0 ? 'up' : 'down';
-
-    const rfidReads = await this.prisma.transportEvent.count({
-      where: { companyId, type: 'BOARDING', createdAt: { gte: today } },
-    });
-
-    const rfidReadsYesterday = await this.prisma.transportEvent.count({
-      where: {
-        companyId,
-        type: 'BOARDING',
-        createdAt: {
-          gte: yesterday,
-          lte: new Date(yesterday.getTime() + 24 * 60 * 60 * 1000 - 1),
+    const [
+      activeStudents,
+      studentsCreatedToday,
+      windowEvents,
+      buses,
+      devices,
+      schedules,
+      promptGroups,
+      confirmationGroups,
+      recentEvents,
+    ] = await Promise.all([
+      this.prisma.student.count({ where: { companyId, active: true } }),
+      this.prisma.student.count({
+        where: { companyId, active: true, createdAt: { gte: todayStart } },
+      }),
+      // Uma única leitura da janela de 7 dias alimenta os KPIs de hoje, a
+      // comparação com ontem e a série do gráfico.
+      this.prisma.transportEvent.findMany({
+        where: { companyId, createdAt: { gte: seriesStart, lte: todayEnd } },
+        select: { type: true, createdAt: true, studentId: true },
+      }),
+      this.prisma.bus.findMany({
+        where: { companyId },
+        select: { id: true, plate: true, capacity: true },
+      }),
+      this.prisma.device.findMany({
+        where: { companyId, active: true },
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          busId: true,
+          lastUpdate: true,
+          bus: { select: { plate: true } },
         },
-      },
-    });
-
-    const changeRfid = rfidReads - rfidReadsYesterday;
-    const trendRfid = changeRfid >= 0 ? 'up' : 'down';
-
-    const tripsToday = await this.prisma.trip.count({
-      where: { companyId, startedAt: { gte: today } },
-    });
-
-    const tripsYesterday = await this.prisma.trip.count({
-      where: {
-        companyId,
-        startedAt: {
-          gte: yesterday,
-          lte: new Date(yesterday.getTime() + 24 * 60 * 60 * 1000 - 1),
+      }),
+      this.prisma.routeSchedule.findMany({
+        where: {
+          active: true,
+          dayOfWeeks: { has: todayParts.dayOfWeek },
+          route: { companyId, active: true },
         },
-      },
-    });
-
-    const changeTrips = tripsToday - tripsYesterday;
-    const trendTrips = changeTrips >= 0 ? 'up' : 'down';
-
-    const buses = await this.prisma.bus.findMany({
-      where: { companyId },
-      include: {
-        trips: {
-          where: { startedAt: { gte: today } },
-          include: { transportEvents: true },
-        },
-      },
-    });
-
-    const busCapacityUsed = buses.reduce((acc, bus) => {
-      const totalBoarded = bus.trips.reduce(
-        (sum, trip) => sum + trip.transportEvents.length,
-        0,
-      );
-      return acc + totalBoarded;
-    }, 0);
-
-    const busesYesterday = await this.prisma.bus.findMany({
-      where: { companyId },
-      include: {
-        trips: {
-          where: {
-            startedAt: {
-              gte: yesterday,
-              lte: new Date(yesterday.getTime() + 24 * 60 * 60 * 1000 - 1),
+        orderBy: { departureMinutes: 'asc' },
+        select: {
+          id: true,
+          type: true,
+          title: true,
+          departureMinutes: true,
+          bus: { select: { plate: true } },
+          route: {
+            select: {
+              name: true,
+              _count: { select: { students: true } },
             },
           },
-          include: { transportEvents: true },
         },
+      }),
+      this.prisma.notificationPrompt.groupBy({
+        by: ['status'],
+        where: {
+          occurrenceKey: todayKey,
+          schedule: { route: { companyId } },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.scheduleConfirmation.groupBy({
+        by: ['willGo'],
+        where: {
+          occurrenceKey: todayKey,
+          schedule: { route: { companyId } },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.transportEvent.findMany({
+        where: { companyId },
+        orderBy: { createdAt: 'desc' },
+        take: METRICS_RECENT_EVENTS,
+        select: {
+          id: true,
+          type: true,
+          createdAt: true,
+          student: { select: { name: true } },
+          rfidCard: { select: { tag: true } },
+          device: {
+            select: {
+              name: true,
+              code: true,
+              bus: { select: { plate: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const series = this.buildMetricsSeries(
+      windowEvents,
+      seriesStartKey,
+      todayKey,
+      timeZone,
+    );
+
+    const todayBucket = series.buckets.get(todayKey) ?? createEmptyBucket();
+    const yesterdayBucket =
+      series.buckets.get(yesterdayKey) ?? createEmptyBucket();
+
+    const capacityTotal = buses.reduce((acc, bus) => acc + bus.capacity, 0);
+    const onlineThreshold = now.getTime() - DEVICE_ONLINE_THRESHOLD_MS;
+    const isDeviceOnline = (lastUpdate: Date | null) =>
+      lastUpdate !== null && lastUpdate.getTime() >= onlineThreshold;
+
+    const devicesOnline = devices.filter((device) =>
+      isDeviceOnline(device.lastUpdate),
+    );
+
+    const linkedBusIds = new Set(
+      devices
+        .map((device) => device.busId)
+        .filter((busId): busId is string => Boolean(busId)),
+    );
+    const busesWithoutDevice = buses.filter((bus) => !linkedBusIds.has(bus.id));
+
+    const promptCounts = {
+      pending: 0,
+      dispatched: 0,
+      answered: 0,
+      expired: 0,
+      failed: 0,
+    };
+
+    for (const group of promptGroups) {
+      const key = group.status.toLowerCase() as keyof typeof promptCounts;
+
+      if (key in promptCounts) {
+        promptCounts[key] = group._count._all;
+      }
+    }
+
+    let willGo = 0;
+    let willNotGo = 0;
+
+    for (const group of confirmationGroups) {
+      if (group.willGo) {
+        willGo = group._count._all;
+      } else {
+        willNotGo = group._count._all;
+      }
+    }
+
+    const upcoming = schedules.filter(
+      (schedule) => schedule.departureMinutes >= todayParts.minutesOfDay,
+    );
+
+    const billing =
+      role === 'ADMIN' ? await this.getBillingSnapshot(companyId, now) : null;
+
+    const metrics: DashboardMetricsResponse = {
+      generatedAt: now.toISOString(),
+      dateKey: todayKey,
+      timeZone,
+      students: {
+        active: activeStudents,
+        createdToday: studentsCreatedToday,
+        transportedToday: todayBucket.students.size,
+        transportedYesterday: yesterdayBucket.students.size,
       },
-    });
+      movement: {
+        boardings: this.buildDelta(
+          todayBucket.boardings,
+          yesterdayBucket.boardings,
+        ),
+        deboardings: this.buildDelta(
+          todayBucket.deboardings,
+          yesterdayBucket.deboardings,
+        ),
+        denied: this.buildDelta(todayBucket.denied, yesterdayBucket.denied),
+        transported: this.buildDelta(
+          todayBucket.students.size,
+          yesterdayBucket.students.size,
+        ),
+        onBoardNow: Math.max(todayBucket.boardings - todayBucket.deboardings, 0),
+      },
+      fleet: {
+        buses: buses.length,
+        busesWithoutDevice: busesWithoutDevice.length,
+        capacityTotal,
+        occupancyRate:
+          capacityTotal > 0
+            ? Math.round((todayBucket.boardings / capacityTotal) * 100)
+            : null,
+        devices: devices.length,
+        devicesOnline: devicesOnline.length,
+        liveDevices: devices
+          .filter((device) => device.busId)
+          .map((device) => ({
+            deviceId: device.id,
+            name: device.name,
+            code: device.code,
+            busPlate: device.bus?.plate ?? null,
+            lastUpdate: device.lastUpdate?.toISOString() ?? null,
+            online: isDeviceOnline(device.lastUpdate),
+          })),
+      },
+      schedules: {
+        totalToday: schedules.length,
+        completed: schedules.length - upcoming.length,
+        upcoming: upcoming
+          .slice(0, METRICS_UPCOMING_SCHEDULES)
+          .map((schedule) => ({
+            scheduleId: schedule.id,
+            routeName: schedule.route.name,
+            title: schedule.title,
+            type: schedule.type,
+            departureMinutes: schedule.departureMinutes,
+            departureLabel: formatMinutesOfDay(schedule.departureMinutes),
+            minutesUntil: schedule.departureMinutes - todayParts.minutesOfDay,
+            busPlate: schedule.bus?.plate ?? null,
+            studentsCount: schedule.route._count.students,
+          })),
+      },
+      confirmations: {
+        prompts: promptCounts,
+        willGo,
+        willNotGo,
+      },
+      billing,
+      series: series.data,
+      recentEvents: recentEvents.map((event) => ({
+        eventId: event.id,
+        type: event.type,
+        at: event.createdAt.toISOString(),
+        studentName: event.student?.name ?? null,
+        rfidTag: event.rfidCard?.tag ?? null,
+        busPlate: event.device.bus?.plate ?? null,
+        deviceLabel: event.device.name ?? event.device.code ?? null,
+      })),
+      alerts: [],
+    };
 
-    const busCapacityYesterday = busesYesterday.reduce((acc, bus) => {
-      const totalBoarded = bus.trips.reduce(
-        (sum, trip) => sum + trip.transportEvents.length,
-        0,
-      );
-      return acc + totalBoarded;
-    }, 0);
+    metrics.alerts = this.buildMetricsAlerts(metrics);
 
-    const changeBuses = busCapacityUsed - busCapacityYesterday;
-    const trendBuses = changeBuses >= 0 ? 'up' : 'down';
+    return metrics;
+  }
 
-    const charts = await this.getChartData(companyId);
-
+  private buildDelta(current: number, previous: number): DashboardMetricDelta {
     return {
-      activeStudents,
-      rfidReads,
-      tripsToday,
-      busCapacityUsed,
-      changeStudents,
-      trendStudents,
-      changeRfid,
-      trendRfid,
-      changeTrips,
-      trendTrips,
-      changeBuses,
-      trendBuses,
-      charts,
+      value: current,
+      previous,
+      delta: current - previous,
+      trend: current === previous ? 'flat' : current > previous ? 'up' : 'down',
     };
   }
 
-  async getChartData(companyId: string) {
-    const days = Array.from({ length: 7 }, (_, index) => {
-      const date = new Date();
-      date.setDate(date.getDate() - index);
-      date.setHours(0, 0, 0, 0);
-      return date;
-    }).reverse();
+  private buildMetricsSeries(
+    events: Array<{
+      type: EventType;
+      createdAt: Date;
+      studentId: string | null;
+    }>,
+    startKey: string,
+    endKey: string,
+    timeZone: string,
+  ) {
+    const buckets = new Map<string, MetricsDayBucket>();
 
-    const boardings: { date: string; count: number }[] = [];
-    const trips: { date: string; count: number }[] = [];
+    let cursor = startKey;
 
-    for (const day of days) {
-      const dayStart = new Date(day);
-      const dayEnd = new Date(day);
-      dayEnd.setHours(23, 59, 59, 999);
-
-      const boardingsCount = await this.prisma.transportEvent.count({
-        where: {
-          companyId,
-          type: 'BOARDING',
-          createdAt: { gte: dayStart, lte: dayEnd },
-        },
-      });
-
-      const tripsCount = await this.prisma.trip.count({
-        where: { companyId, startedAt: { gte: dayStart, lte: dayEnd } },
-      });
-
-      boardings.push({
-        date: day.toISOString().split('T')[0],
-        count: boardingsCount,
-      });
-      trips.push({ date: day.toISOString().split('T')[0], count: tripsCount });
+    while (cursor <= endKey) {
+      buckets.set(cursor, createEmptyBucket());
+      cursor = addDaysToDateKey(cursor, 1);
     }
 
-    return { boardings, trips };
+    for (const event of events) {
+      const dateKey = getZonedDateParts(event.createdAt, timeZone).dateKey;
+      const bucket = buckets.get(dateKey);
+
+      if (!bucket) {
+        continue;
+      }
+
+      if (event.type === 'BOARDING') {
+        bucket.boardings += 1;
+
+        if (event.studentId) {
+          bucket.students.add(event.studentId);
+        }
+      } else if (event.type === 'DEBOARDING') {
+        bucket.deboardings += 1;
+      } else if (event.type === 'DENIED') {
+        bucket.denied += 1;
+      }
+    }
+
+    const data = Array.from(buckets.entries()).map(([date, bucket]) => ({
+      date,
+      boardings: bucket.boardings,
+      deboardings: bucket.deboardings,
+      denied: bucket.denied,
+      students: bucket.students.size,
+    }));
+
+    return { buckets, data };
+  }
+
+  private async getBillingSnapshot(
+    companyId: string,
+    now: Date,
+  ): Promise<DashboardBillingSnapshot> {
+    const monthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
+
+    const [openCharges, overdueCharges, paidCharges] = await Promise.all([
+      this.prisma.billingCharge.aggregate({
+        where: {
+          companyId,
+          status: { in: ['ISSUED', 'SENT'] },
+          dueDate: { gte: now },
+        },
+        _count: { _all: true },
+        _sum: { amountCents: true },
+      }),
+      this.prisma.billingCharge.aggregate({
+        where: {
+          companyId,
+          OR: [
+            { status: 'OVERDUE' },
+            { status: { in: ['ISSUED', 'SENT'] }, dueDate: { lt: now } },
+          ],
+        },
+        _count: { _all: true },
+        _sum: { amountCents: true },
+      }),
+      this.prisma.billingCharge.aggregate({
+        where: { companyId, status: 'PAID', paidAt: { gte: monthStart } },
+        _count: { _all: true },
+        _sum: { amountCents: true },
+      }),
+    ]);
+
+    return {
+      openCount: openCharges._count._all,
+      openAmountCents: openCharges._sum.amountCents ?? 0,
+      overdueCount: overdueCharges._count._all,
+      overdueAmountCents: overdueCharges._sum.amountCents ?? 0,
+      paidThisMonthCount: paidCharges._count._all,
+      paidThisMonthAmountCents: paidCharges._sum.amountCents ?? 0,
+    };
+  }
+
+  private buildMetricsAlerts(
+    metrics: DashboardMetricsResponse,
+  ): DashboardAlert[] {
+    const alerts: DashboardAlert[] = [];
+
+    const offlineDevices = metrics.fleet.liveDevices.filter(
+      (device) => !device.online,
+    );
+
+    if (offlineDevices.length > 0) {
+      alerts.push({
+        key: 'devices-offline',
+        level: 'warning',
+        title:
+          offlineDevices.length === 1
+            ? '1 UniHub sem sinal'
+            : `${offlineDevices.length} UniHubs sem sinal`,
+        description:
+          'Dispositivos vinculados a um ônibus que não enviam telemetria há mais de 45 segundos.',
+        href: '/dashboard/location',
+      });
+    }
+
+    if (metrics.fleet.busesWithoutDevice > 0) {
+      alerts.push({
+        key: 'buses-without-device',
+        level: 'info',
+        title:
+          metrics.fleet.busesWithoutDevice === 1
+            ? '1 ônibus sem UniHub'
+            : `${metrics.fleet.busesWithoutDevice} ônibus sem UniHub`,
+        description:
+          'Sem dispositivo pareado não há leitura de TAG nem rastreamento nesses veículos.',
+        href: '/dashboard/devices',
+      });
+    }
+
+    if (metrics.movement.denied.value > 0) {
+      alerts.push({
+        key: 'denied-events',
+        level: 'warning',
+        title:
+          metrics.movement.denied.value === 1
+            ? '1 leitura negada hoje'
+            : `${metrics.movement.denied.value} leituras negadas hoje`,
+        description:
+          'TAG desconhecida, aluno inativo ou embarque duplicado. Vale conferir os cadastros.',
+        href: '/dashboard/boarding',
+      });
+    }
+
+    if (metrics.confirmations.prompts.failed > 0) {
+      alerts.push({
+        key: 'prompts-failed',
+        level: 'danger',
+        title: `${metrics.confirmations.prompts.failed} notificações falharam`,
+        description:
+          'Os avisos de horário não chegaram nesses responsáveis hoje.',
+        href: '/dashboard/app',
+      });
+    }
+
+    if (metrics.billing && metrics.billing.overdueCount > 0) {
+      alerts.push({
+        key: 'billing-overdue',
+        level: 'danger',
+        title: `${metrics.billing.overdueCount} boletos vencidos`,
+        description: `Total de ${formatCents(metrics.billing.overdueAmountCents)} em aberto após o vencimento.`,
+        href: '/dashboard/billing',
+      });
+    }
+
+    return alerts;
   }
 
   async getReport(

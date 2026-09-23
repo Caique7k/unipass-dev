@@ -1,46 +1,88 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { buildApiUrl } from "@/services/api";
-import type { DashboardData } from "../dashboard/components/DashboardContent";
+import type { DashboardMetrics } from "../dashboard/types/dashboard";
+
+const REFRESH_INTERVAL_MS = 15000;
 
 export function useDashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [live, setLive] = useState(true);
 
-  useEffect(() => {
-    async function fetchDashboard() {
-      try {
-        const res = await fetch(buildApiUrl("/dashboard"), {
-          credentials: "include",
-          cache: "no-store",
-        });
+  // Evita que uma resposta lenta sobrescreva uma mais recente.
+  const requestIdRef = useRef(0);
 
-        if (!res.ok) throw new Error("Erro ao buscar dashboard");
+  const fetchDashboard = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    setRefreshing(true);
 
-        const json = (await res.json()) as DashboardData;
-        setData(json);
-        setError(null);
-        setLastUpdated(new Date());
-      } catch (err: unknown) {
-        setError(
-          err instanceof Error ? err.message : "Erro ao buscar dashboard",
+    try {
+      const res = await fetch(buildApiUrl("/dashboard"), {
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          res.status === 403
+            ? "Seu perfil não tem acesso às métricas da empresa."
+            : "Não foi possível carregar o painel agora.",
         );
-      } finally {
+      }
+
+      const json = (await res.json()) as DashboardMetrics;
+
+      if (requestId !== requestIdRef.current) return;
+
+      setData(json);
+      setError(null);
+      setLastUpdated(new Date());
+    } catch (err: unknown) {
+      if (requestId !== requestIdRef.current) return;
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível carregar o painel agora.",
+      );
+    } finally {
+      if (requestId === requestIdRef.current) {
         setLoading(false);
+        setRefreshing(false);
       }
     }
-
-    fetchDashboard();
-
-    const interval = setInterval(() => {
-      fetchDashboard();
-    }, 10000);
-
-    return () => clearInterval(interval);
   }, []);
 
-  return { data, loading, error, lastUpdated };
+  useEffect(() => {
+    void fetchDashboard();
+  }, [fetchDashboard]);
+
+  useEffect(() => {
+    if (!live) return;
+
+    const interval = setInterval(() => {
+      // Não gasta requisição com a aba em segundo plano.
+      if (document.visibilityState === "visible") {
+        void fetchDashboard();
+      }
+    }, REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [live, fetchDashboard]);
+
+  return {
+    data,
+    loading,
+    refreshing,
+    error,
+    lastUpdated,
+    live,
+    toggleLive: () => setLive((prev) => !prev),
+    refresh: fetchDashboard,
+  };
 }
