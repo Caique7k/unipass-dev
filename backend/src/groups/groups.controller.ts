@@ -35,8 +35,8 @@ export class GroupsController {
   findAll(@Req() req: any, @Query() query: FindGroupsDto) {
     return this.groupsService.findAll({
       companyId: req.user.companyId,
-      page: Number(query.page) || 1,
-      limit: Number(query.limit) || 10,
+      page: query.page ?? 1,
+      limit: query.limit ?? 10,
       search: query.search,
       active: query.active === undefined ? undefined : query.active === 'true',
     });

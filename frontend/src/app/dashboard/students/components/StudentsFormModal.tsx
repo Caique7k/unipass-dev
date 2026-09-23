@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { BookUser } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  FormModal,
+  ModalCancelButton,
+  ModalSubmitButton,
+} from "../../components/FormModal";
+import { Check, ChevronsUpDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -549,65 +548,95 @@ export function StudentModal({
     });
   };
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden border-0 p-0 shadow-2xl sm:max-w-[720px]">
-        <div className="border-b border-[#ff5c00]/10 bg-[#ff5c00]/[0.04] px-6 py-5">
-          <DialogHeader className="gap-1">
-            <DialogTitle className="text-2xl font-bold text-foreground">
-              {isEdit ? "Editar aluno" : "Novo aluno"}
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              {isEdit
-                ? "Atualize os dados cadastrais, financeiros e operacionais deste aluno."
-                : "Preencha os dados, escolha o grupo de boletos e vincule o RFID no final."}
-            </DialogDescription>
-          </DialogHeader>
-        </div>
+  const primarySubmitLabel = groupsLoading
+    ? "Carregando grupos..."
+    : billingTemplatesLoading
+      ? "Carregando grupos de boletos..."
+      : routesLoading
+        ? "Carregando rotas..."
+        : isMissingGroups
+          ? "Cadastre um grupo primeiro"
+          : isMissingBillingTemplates
+            ? "Cadastre um grupo de boletos primeiro"
+            : isMissingRoutes
+              ? "Cadastre uma rota primeiro"
+              : isEdit
+                ? "Salvar alterações"
+                : "Criar e vincular TAG";
 
-        <div className="unipass-scrollbar min-h-0 space-y-6 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-6">
+  return (
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="lg"
+      icon={<BookUser size={18} />}
+      title={
+        isLinking
+          ? "Vincular TAG RFID"
+          : isEdit
+            ? "Editar aluno"
+            : "Novo aluno"
+      }
+      description={
+        isLinking
+          ? "Aproxime a TAG do leitor ou digite o código para concluir o vínculo."
+          : isEdit
+            ? "Atualize os dados cadastrais, financeiros e operacionais deste aluno."
+            : "Preencha os dados, escolha o grupo de boletos e vincule a TAG no final."
+      }
+      footer={
+        isLinking ? (
+          <ModalSubmitButton onClick={handleConfirmLink}>
+            Confirmar vínculo
+          </ModalSubmitButton>
+        ) : (
+          <>
+            <ModalCancelButton onClick={() => onOpenChange(false)} />
+            <ModalSubmitButton
+              onClick={handleSubmit}
+              busy={isSaving}
+              disabled={
+                groupsLoading ||
+                isMissingGroups ||
+                billingTemplatesLoading ||
+                isMissingBillingTemplates ||
+                routesLoading ||
+                isMissingRoutes
+              }
+            >
+              {primarySubmitLabel}
+            </ModalSubmitButton>
+          </>
+        )
+      }
+    >
+        <div className="space-y-6">
           {!isLinking ? (
             <>
-              <div className="grid gap-4 rounded-2xl border border-border/60 bg-card/70 p-4 sm:grid-cols-3">
-                <div className="rounded-2xl bg-[#ff5c00]/8 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00]">
-                    Cadastro
-                  </p>
-                  <p className="mt-2 text-sm font-medium text-foreground">
-                    {isEdit ? "Edicao de aluno" : "Novo aluno"}
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    O e-mail do aluno fica sempre amarrado ao dominio da
-                    empresa.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-border/50 bg-background/50 px-3 py-2.5">
+                  <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     E-mail institucional
                   </p>
-                  <p className="mt-2 break-all text-base font-semibold text-foreground">
+                  <p className="mt-1 break-all text-sm font-medium">
                     {resolvedEmailPreview || "Defina o login do aluno"}
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {emailDomain
-                      ? `Dominio fixo da empresa: @${emailDomain}`
-                      : "Use o login que o aluno vai usar para acessar."}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <div className="rounded-2xl border border-border/50 bg-background/50 px-3 py-2.5">
+                  <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     Grupo de boletos
                   </p>
-                  <p className="mt-2 text-base font-semibold text-foreground">
-                    {selectedBillingTemplate?.name || "Selecione uma regra"}
+                  <p className="mt-1 text-sm font-medium">
+                    {selectedBillingTemplate?.name || "Nenhum selecionado"}
                   </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {selectedBillingTemplate
-                      ? `${formatCurrency(selectedBillingTemplate.amountCents)} • dia ${selectedBillingTemplate.dueDay} • ${billingRecurrenceLabels[selectedBillingTemplate.recurrence]}`
-                      : "Essa regra define valor e recorrencia da cobranca."}
-                  </p>
+                  {selectedBillingTemplate && (
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {formatCurrency(selectedBillingTemplate.amountCents)} · dia{" "}
+                      {selectedBillingTemplate.dueDay} ·{" "}
+                      {billingRecurrenceLabels[selectedBillingTemplate.recurrence]}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1081,52 +1110,19 @@ export function StudentModal({
                 <p className="text-sm text-red-500">{serverError}</p>
               )}
 
-              <div className="flex flex-col-reverse gap-3 border-t border-border/60 pt-2 sm:flex-row sm:justify-end">
-                <Button
-                  onClick={handleSubmit}
-                  disabled={
-                    isSaving ||
-                    groupsLoading ||
-                    isMissingGroups ||
-                    billingTemplatesLoading ||
-                    isMissingBillingTemplates ||
-                    routesLoading ||
-                    isMissingRoutes
-                  }
-                  className="h-11 w-full cursor-pointer rounded-xl px-6 sm:w-auto"
-                >
-                  {groupsLoading
-                    ? "Carregando grupos..."
-                    : billingTemplatesLoading
-                      ? "Carregando grupos de boletos..."
-                      : routesLoading
-                        ? "Carregando rotas..."
-                        : isMissingGroups
-                          ? "Cadastre um grupo primeiro"
-                          : isMissingBillingTemplates
-                            ? "Cadastre um grupo de boletos primeiro"
-                            : isMissingRoutes
-                              ? "Cadastre uma rota primeiro"
-                              : isSaving
-                                ? "Salvando..."
-                                : isEdit
-                                  ? "Salvar alteracoes"
-                                  : "Criar e vincular RFID"}
-                </Button>
-              </div>
             </>
           ) : (
             <div className="space-y-6">
               <div className="grid gap-4 rounded-2xl border border-border/60 bg-card/70 p-4 sm:grid-cols-2">
                 <div className="rounded-2xl bg-[#ff5c00]/8 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00]">
-                    Vinculo
+                    Vínculo
                   </p>
                   <p className="mt-2 text-sm font-medium text-foreground">
                     Cartao do aluno
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Aproxime o cartao ou informe o codigo RFID manualmente.
+                    Aproxime a TAG do leitor ou informe o código manualmente.
                   </p>
                 </div>
 
@@ -1145,29 +1141,20 @@ export function StudentModal({
 
               <div className="space-y-2 text-center">
                 <p className="text-sm font-medium text-foreground">
-                  Aproxime o cartao ou insira o codigo abaixo.
+                  Aproxime a TAG do leitor ou digite o código abaixo.
                 </p>
 
                 <Input
-                  placeholder="Simular RFID"
+                  placeholder="Código da TAG"
                   value={rfidTag}
                   onChange={(e) => setRfidTag(e.target.value)}
                   className="h-11 rounded-xl border-border/70 bg-background px-3"
                 />
               </div>
 
-              <div className="flex flex-col-reverse gap-3 border-t border-border/60 pt-2 sm:flex-row sm:justify-end">
-                <Button
-                  onClick={handleConfirmLink}
-                  className="h-11 w-full cursor-pointer rounded-xl px-6 sm:w-auto"
-                >
-                  Confirmar
-                </Button>
-              </div>
             </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+    </FormModal>
   );
 }

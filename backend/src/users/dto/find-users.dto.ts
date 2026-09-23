@@ -1,11 +1,12 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBooleanString, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { UserRole } from '@prisma/client';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 const trimString = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 
-export class ListDevicesDto extends PaginationQueryDto {
+export class FindUsersDto extends PaginationQueryDto {
   @IsOptional()
   @Transform(trimString)
   @IsString()
@@ -13,7 +14,11 @@ export class ListDevicesDto extends PaginationQueryDto {
   search?: string;
 
   @IsOptional()
-  @Transform(({ value }) => value === 'true')
-  @IsBoolean()
-  active?: boolean;
+  @IsBooleanString()
+  active?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsIn(Object.values(UserRole))
+  role?: string;
 }

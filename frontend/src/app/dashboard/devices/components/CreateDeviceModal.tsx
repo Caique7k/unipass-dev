@@ -1,12 +1,31 @@
 "use client";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { HelpCircle } from "lucide-react";
+import { FormModal, ModalCancelButton } from "../../components/FormModal";
+import { ACCENT } from "../../components/primitives";
+
+const steps = [
+  {
+    title: "Ligue o UniHub",
+    description:
+      "Ao ligar, o dispositivo pede um código temporário ao servidor automaticamente.",
+  },
+  {
+    title: "Leia o código na tela",
+    description:
+      "São 6 caracteres exibidos no próprio dispositivo. Ele vale por 10 minutos.",
+  },
+  {
+    title: "Conclua aqui no painel",
+    description:
+      'Clique em "Parear dispositivo", informe o código e escolha o ônibus.',
+  },
+  {
+    title: "Pronto",
+    description:
+      "O UniHub recebe credenciais definitivas e passa a registrar embarques e localização.",
+  },
+];
 
 export function CreateDeviceModal({
   open,
@@ -16,59 +35,37 @@ export function CreateDeviceModal({
   onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden border-0 p-0 shadow-2xl sm:max-w-[620px]">
-        <div className="border-b border-[#ff5c00]/10 bg-[#ff5c00]/[0.04] px-6 py-5">
-          <DialogHeader className="gap-1">
-            <DialogTitle className="text-2xl font-bold text-foreground">
-              Como funciona o pareamento?
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              Um passo a passo rápido para conectar um novo UniHub.
-            </DialogDescription>
-          </DialogHeader>
-        </div>
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={<HelpCircle size={18} />}
+      title="Como funciona o pareamento"
+      description="Quatro passos para conectar um novo UniHub à sua operação."
+      footer={<ModalCancelButton onClick={() => onOpenChange(false)}>Entendi</ModalCancelButton>}
+    >
+      <ol className="relative space-y-4 pl-8">
+        {/* trilho vertical ligando os passos */}
+        <span
+          aria-hidden
+          className="absolute left-[11px] top-3 bottom-3 w-px bg-border"
+        />
 
-        <div className="unipass-scrollbar min-h-0 space-y-6 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-6">
-          <div className="grid gap-4 rounded-2xl border border-border/60 bg-card/70 p-4 sm:grid-cols-3">
-            <div className="rounded-2xl bg-[#ff5c00]/8 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00]">
-                1
-              </p>
-              <p className="mt-2 text-sm font-medium text-foreground">
-                Gere o código
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Ligue o UniHub e solicite um código temporário ao servidor.
-              </p>
-            </div>
+        {steps.map((step, index) => (
+          <li key={step.title} className="relative">
+            <span
+              className="absolute -left-8 flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-4 ring-card"
+              style={{ backgroundColor: ACCENT }}
+            >
+              {index + 1}
+            </span>
 
-            <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                2
-              </p>
-              <p className="mt-2 text-sm font-medium text-foreground">
-                Veja o código
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                O dispositivo pode exibir esse código em tela, serial ou QR code.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                3
-              </p>
-              <p className="mt-2 text-sm font-medium text-foreground">
-                Conclua no painel
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Clique em &quot;Parear dispositivo&quot; e informe o código temporário.
-              </p>
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+            <p className="text-sm font-medium">{step.title}</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+              {step.description}
+            </p>
+          </li>
+        ))}
+      </ol>
+    </FormModal>
   );
 }

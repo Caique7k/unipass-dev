@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Layers3 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { buildApiUrl } from "@/services/api";
 import type { Group } from "../types/group";
+import {
+  FormField,
+  FormModal,
+  ModalCancelButton,
+  ModalSubmitButton,
+  fieldAccentStyle,
+  fieldInputClass,
+} from "../../components/FormModal";
 
 export function GroupFormModal({
   open,
@@ -46,13 +46,9 @@ export function GroupFormModal({
         isEdit ? buildApiUrl(`/groups/${group?.id}`) : buildApiUrl("/groups"),
         {
           method: isEdit ? "PATCH" : "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({
-            name,
-          }),
+          body: JSON.stringify({ name }),
         },
       );
 
@@ -78,49 +74,39 @@ export function GroupFormModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar grupo" : "Novo grupo"}</DialogTitle>
-          <DialogDescription>
-            Defina um nome para identificar esse grupo de colaboradores.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Nome do grupo</label>
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Ex.: Usina, Faculdade, Turno A"
-            />
-          </div>
-
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              className="cursor-pointer"
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSaving}
-              className="cursor-pointer"
-            >
-              {isSaving
-                ? "Salvando..."
-                : isEdit
-                  ? "Salvar alterações"
-                  : "Criar grupo"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      icon={<Layers3 size={18} />}
+      title={isEdit ? "Editar grupo" : "Novo grupo"}
+      description="Grupos organizam os alunos em turmas para relatórios e agrupamento visual."
+      footer={
+        <>
+          <ModalCancelButton onClick={() => onOpenChange(false)} />
+          <ModalSubmitButton onClick={handleSubmit} busy={isSaving}>
+            {isEdit ? "Salvar alterações" : "Criar grupo"}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+      <FormField
+        label="Nome do grupo"
+        required
+        hint="Ex.: Turma da Manhã, Turno A, Faculdade."
+      >
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") handleSubmit();
+          }}
+          placeholder="Digite o nome do grupo"
+          autoComplete="off"
+          className={fieldInputClass}
+          style={fieldAccentStyle}
+        />
+      </FormField>
+    </FormModal>
   );
 }

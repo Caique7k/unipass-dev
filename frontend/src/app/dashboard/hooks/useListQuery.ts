@@ -43,9 +43,17 @@ function toQueryString(params: ListParams) {
 export function useListQuery<T>(
   path: string,
   params: ListParams,
-  options: { enabled?: boolean } = {},
+  options: {
+    enabled?: boolean;
+    /**
+     * Chamado quando a página pedida não existe mais (ex.: o último item da
+     * página 3 foi desativado). Sem isso a tabela ficaria vazia e o usuário
+     * preso numa página inexistente.
+     */
+    onPageOutOfRange?: (lastPage: number) => void;
+  } = {},
 ) {
-  const { enabled = true } = options;
+  const { enabled = true, onPageOutOfRange } = options;
 
   const [rows, setRows] = useState<T[]>([]);
   const [lastPage, setLastPage] = useState(1);
@@ -57,6 +65,10 @@ export function useListQuery<T>(
   const queryString = toQueryString(params);
   const requestIdRef = useRef(0);
   const loadedRef = useRef(false);
+
+  // Guardado em ref para não entrar nas dependências do efeito de busca.
+  const onPageOutOfRangeRef = useRef(onPageOutOfRange);
+  onPageOutOfRangeRef.current = onPageOutOfRange;
 
   const run = useCallback(
     async (signal?: AbortSignal) => {
@@ -86,10 +98,22 @@ export function useListQuery<T>(
 
         if (requestId !== requestIdRef.current) return;
 
-        setRows(Array.isArray(json.data) ? json.data : []);
-        setLastPage(json.lastPage ?? 1);
-        setTotal(json.total ?? json.data?.length ?? 0);
+        const nextRows = Array.isArray(json.data) ? json.data : [];
+        const nextLastPage = json.lastPage ?? 1;
+        const requestedPage = Number(params.page ?? 1);
+
+        setRows(nextRows);
+        setLastPage(nextLastPage);
+        setTotal(json.total ?? nextRows.length);
         setError(null);
+
+        if (
+          nextRows.length === 0 &&
+          nextLastPage >= 1 &&
+          requestedPage > nextLastPage
+        ) {
+          onPageOutOfRangeRef.current?.(nextLastPage);
+        }
       } catch (err) {
         if (signal?.aborted || (err as Error)?.name === "AbortError") return;
         if (requestId !== requestIdRef.current) return;
@@ -107,7 +131,7 @@ export function useListQuery<T>(
         }
       }
     },
-    [path, queryString],
+    [path, queryString, params.page],
   );
 
   useEffect(() => {

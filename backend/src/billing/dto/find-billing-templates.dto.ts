@@ -1,19 +1,18 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsBooleanString, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
-export class FindBillingTemplatesDto {
-  @IsOptional()
-  @IsString()
-  page?: string;
+const trimString = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
 
+export class FindBillingTemplatesDto extends PaginationQueryDto {
   @IsOptional()
+  @Transform(trimString)
   @IsString()
-  limit?: string;
-
-  @IsOptional()
-  @IsString()
+  @MaxLength(80)
   search?: string;
 
   @IsOptional()
-  @IsString()
+  @IsBooleanString()
   active?: string;
 }

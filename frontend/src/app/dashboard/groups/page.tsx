@@ -54,8 +54,16 @@ export default function GroupsPage() {
         search: debouncedSearch,
         active: activeFilter,
       },
-      { enabled: canView },
+      {
+        enabled: canView,
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows.filter((group) => selectedIds.includes(group.id)).map((group) => group.name);
 
   const columns: Column<Group>[] = [
     {
@@ -267,16 +275,15 @@ export default function GroupsPage() {
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
             busy={deleting}
-            title="Desativar grupos?"
             confirmLabel="Desativar"
-            description={
-              <>
-                Você está prestes a desativar{" "}
-                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-                {selectedIds.length === 1 ? "grupo" : "grupos"}. Os alunos
-                vinculados continuam cadastrados.
-              </>
+            title={
+              selectedIds.length === 1
+                ? "Desativar este grupo?"
+                : `Desativar ${selectedIds.length} grupos?`
             }
+            description="O grupo some das listagens e dos relatórios."
+            items={selectedNames}
+            consequence="Os alunos vinculados continuam cadastrados, apenas sem grupo."
           />
         </>
       )}

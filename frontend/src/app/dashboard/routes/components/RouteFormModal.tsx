@@ -1,18 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Route as RouteIcon } from "lucide-react";
 import { toast } from "sonner";
+import {
+  FormField,
+  FormModal,
+  ModalCancelButton,
+  ModalSubmitButton,
+  fieldAccentStyle,
+  fieldInputClass,
+} from "../../components/FormModal";
 import { buildApiUrl } from "@/services/api";
 import { Route } from "../types/route.types";
 
@@ -112,111 +110,61 @@ export function RouteModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden border-0 p-0 shadow-2xl sm:max-w-[620px]">
-        <div className="border-b border-[#ff5c00]/10 bg-[#ff5c00]/[0.04] px-6 py-5">
-          <DialogHeader className="gap-1">
-            <DialogTitle className="text-2xl font-bold text-foreground">
-              {isEdit ? "Editar rota" : "Nova rota"}
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              {isEdit
-                ? "Atualize os dados principais desta rota."
-                : "Cadastre uma rota para organizar os horários da operação."}
-            </DialogDescription>
-          </DialogHeader>
-        </div>
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={<RouteIcon size={18} />}
+      title={isEdit ? "Editar rota" : "Nova rota"}
+      description="A rota é a linha em si. Os horários de ida e volta são cadastrados depois, dentro dela."
+      footer={
+        <>
+          <ModalCancelButton onClick={() => onOpenChange(false)} />
+          <ModalSubmitButton onClick={handleSave} busy={isSaving}>
+            {isEdit ? "Salvar alterações" : "Criar rota"}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <FormField
+          label="Nome da rota"
+          required
+          hint={`${trimmedName.length}/${ROUTE_NAME_MAX_LENGTH} caracteres`}
+          error={
+            trimmedName.length > ROUTE_NAME_MAX_LENGTH
+              ? `O nome pode ter no máximo ${ROUTE_NAME_MAX_LENGTH} caracteres.`
+              : undefined
+          }
+        >
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Ex.: Linha Centro → Escola"
+            autoComplete="off"
+            className={fieldInputClass}
+            style={fieldAccentStyle}
+          />
+        </FormField>
 
-        <div className="unipass-scrollbar min-h-0 space-y-6 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-6">
-          <div className="grid gap-4 rounded-2xl border border-border/60 bg-card/70 p-4 sm:grid-cols-2">
-            <div className="rounded-2xl bg-[#ff5c00]/8 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00]">
-                Cadastro
-              </p>
-              <p className="mt-2 text-sm font-medium text-foreground">
-                {isEdit ? "Edicao da rota" : "Nova rota"}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {isEdit
-                  ? "Revise nome e descricao antes de salvar."
-                  : "Defina um nome claro para localizar a rota com facilidade."}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Resumo rápido
-              </p>
-              <p className="mt-2 break-words text-base font-semibold text-foreground">
-                {trimmedName || "Nome ainda não definido"}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {trimmedDescription ||
-                  "Adicione uma descrição opcional para bairros, pontos ou observações."}
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="route-name" className="text-sm font-medium">
-              Nome da rota
-            </Label>
-            <Input
-              id="route-name"
-              placeholder="Ex.: Centro x Campus"
-              value={name}
-              maxLength={ROUTE_NAME_MAX_LENGTH}
-              className="h-11 rounded-xl border-border/70 bg-background px-3"
-              onChange={(event) => setName(event.target.value)}
-            />
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Use um nome curto e facil de localizar.</span>
-              <span>{trimmedName.length}/{ROUTE_NAME_MAX_LENGTH}</span>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="route-description" className="text-sm font-medium">
-              Descrição
-            </Label>
-            <Textarea
-              id="route-description"
-              value={description}
-              maxLength={ROUTE_DESCRIPTION_MAX_LENGTH}
-              className="min-h-32 rounded-2xl border-border/70 bg-background px-3 py-3"
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Detalhes adicionais, bairros atendidos ou observações."
-            />
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>Opcional. Campo ideal para contexto operacional.</span>
-              <span>{trimmedDescription.length}/{ROUTE_DESCRIPTION_MAX_LENGTH}</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col-reverse gap-3 border-t border-border/60 pt-2 sm:flex-row sm:justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              className="w-full cursor-pointer sm:w-auto"
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="h-11 w-full cursor-pointer rounded-xl px-6 sm:w-auto"
-            >
-              {isSaving
-                ? "Salvando..."
-                : isEdit
-                  ? "Salvar alterações"
-                  : "Criar rota"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        <FormField
+          label="Descrição"
+          hint={`Opcional · ${trimmedDescription.length}/${ROUTE_DESCRIPTION_MAX_LENGTH} caracteres`}
+          error={
+            trimmedDescription.length > ROUTE_DESCRIPTION_MAX_LENGTH
+              ? `A descrição pode ter no máximo ${ROUTE_DESCRIPTION_MAX_LENGTH} caracteres.`
+              : undefined
+          }
+        >
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Bairros atendidos, pontos de referência, observações da linha..."
+            rows={4}
+            className={`${fieldInputClass} h-auto resize-y py-2.5 leading-relaxed`}
+            style={fieldAccentStyle}
+          />
+        </FormField>
+      </div>
+    </FormModal>
   );
 }

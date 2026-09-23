@@ -43,13 +43,21 @@ export default function BusesPage() {
     useListQuery<Bus>(
       "/buses",
       { page, limit: PAGE_SIZE, search: debouncedSearch },
-      { enabled: canView },
+      {
+        enabled: canView,
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
 
   const totalCapacity = useMemo(
     () => rows.reduce((sum, bus) => sum + (bus.capacity ?? 0), 0),
     [rows],
   );
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows.filter((bus) => selectedIds.includes(bus.id)).map((bus) => bus.plate);
 
   const columns: Column<Bus>[] = [
     {
@@ -255,16 +263,15 @@ export default function BusesPage() {
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
             busy={deleting}
-            title="Desativar ônibus?"
             confirmLabel="Desativar"
-            description={
-              <>
-                Você está prestes a desativar{" "}
-                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-                {selectedIds.length === 1 ? "ônibus" : "ônibus"}. Essa ação não
-                pode ser desfeita.
-              </>
+            title={
+              selectedIds.length === 1
+                ? "Desativar este ônibus?"
+                : `Desativar ${selectedIds.length} ônibus?`
             }
+            description="O veículo sai da operação e deixa de aparecer nas rotas e nos vínculos com UniHub."
+            items={selectedNames}
+            consequence="Essa ação não pode ser desfeita pelo painel."
           />
         </>
       )}

@@ -64,8 +64,18 @@ export default function UsersPage() {
           status === "Todos" ? undefined : status === "Ativos" ? "true" : "false",
         role: roleFilter === "Todos" ? undefined : roleFilter,
       },
-      { enabled: canManage },
+      {
+        enabled: canManage,
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows
+    .filter((managed) => selectedIds.includes(managed.id))
+    .map((managed) => `${managed.name} · ${managed.email}`);
 
   const columns: Column<ManagedUser>[] = [
     {
@@ -310,16 +320,15 @@ export default function UsersPage() {
         onOpenChange={setDeleteOpen}
         onConfirm={handleConfirmDeactivate}
         busy={deleting}
-        title="Desativar usuários?"
         confirmLabel="Desativar"
-        description={
-          <>
-            Você está prestes a desativar{" "}
-            <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-            {selectedIds.length === 1 ? "usuário" : "usuários"}. Eles perdem o
-            acesso ao painel imediatamente.
-          </>
+        title={
+          selectedIds.length === 1
+            ? "Desativar este usuário?"
+            : `Desativar ${selectedIds.length} usuários?`
         }
+        description="A conta continua cadastrada, mas sem acesso."
+        items={selectedNames}
+        consequence="Eles perdem o acesso ao painel imediatamente, na próxima requisição."
       />
     </div>
   );

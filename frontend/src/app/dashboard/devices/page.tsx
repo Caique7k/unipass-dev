@@ -55,8 +55,18 @@ export default function DevicesPage() {
         search: debouncedSearch,
         active: activeFilter,
       },
-      { enabled: canManage },
+      {
+        enabled: canManage,
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows
+    .filter((device) => selectedIds.includes(device.id))
+    .map((device) => device.name || device.code || device.hardwareId);
 
   const columns: Column<Device>[] = [
     {
@@ -273,16 +283,15 @@ export default function DevicesPage() {
         onOpenChange={setDeleteOpen}
         onConfirm={handleConfirmDelete}
         busy={deleting}
-        title="Desativar UniHubs?"
         confirmLabel="Desativar"
-        description={
-          <>
-            Você está prestes a desativar{" "}
-            <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-            {selectedIds.length === 1 ? "dispositivo" : "dispositivos"}. Eles
-            param de registrar embarques e enviar localização.
-          </>
+        title={
+          selectedIds.length === 1
+            ? "Desativar este UniHub?"
+            : `Desativar ${selectedIds.length} UniHubs?`
         }
+        description="O dispositivo é desvinculado da operação da empresa."
+        items={selectedNames}
+        consequence="Ele para de registrar embarques e de enviar localização na hora."
       />
     </div>
   );

@@ -56,8 +56,16 @@ export default function RoutesPage() {
         search: debouncedSearch,
         active: activeFilter,
       },
-      { enabled: canView },
+      {
+        enabled: canView,
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows.filter((route) => selectedIds.includes(route.id)).map((route) => route.name);
 
   const columns: Column<Route>[] = [
     {
@@ -296,16 +304,15 @@ export default function RoutesPage() {
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
             busy={deleting}
-            title="Desativar rotas?"
             confirmLabel="Desativar"
-            description={
-              <>
-                Você está prestes a desativar{" "}
-                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-                {selectedIds.length === 1 ? "rota" : "rotas"}. Os horários dessas
-                rotas deixam de notificar os responsáveis.
-              </>
+            title={
+              selectedIds.length === 1
+                ? "Desativar esta rota?"
+                : `Desativar ${selectedIds.length} rotas?`
             }
+            description="A rota sai da operação junto com os horários dela."
+            items={selectedNames}
+            consequence="Os avisos de presença desses horários deixam de ser enviados aos responsáveis."
           />
         </>
       )}

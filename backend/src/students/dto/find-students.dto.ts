@@ -1,11 +1,11 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBooleanString, IsOptional, IsString, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 const trimString = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 
-export class ListDevicesDto extends PaginationQueryDto {
+export class FindStudentsDto extends PaginationQueryDto {
   @IsOptional()
   @Transform(trimString)
   @IsString()
@@ -13,7 +13,6 @@ export class ListDevicesDto extends PaginationQueryDto {
   search?: string;
 
   @IsOptional()
-  @Transform(({ value }) => value === 'true')
-  @IsBoolean()
-  active?: boolean;
+  @IsBooleanString()
+  active?: string;
 }

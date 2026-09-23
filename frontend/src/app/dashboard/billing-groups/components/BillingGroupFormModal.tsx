@@ -2,16 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { FileText } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  FormField,
+  FormModal,
+  ModalCancelButton,
+  ModalSubmitButton,
+  fieldAccentStyle,
+  fieldInputClass,
+} from "../../components/FormModal";
 import {
   Select,
   SelectContent,
@@ -19,7 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { buildApiUrl } from "@/services/api";
 import {
   billingRecurrenceLabels,
@@ -159,110 +157,102 @@ export function BillingGroupFormModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[640px]">
-        <DialogHeader>
-          <DialogTitle>
-            {isEdit ? "Editar grupo de boletos" : "Novo grupo de boletos"}
-          </DialogTitle>
-          <DialogDescription>
-            Defina o nome, valor e a recorrencia que ficarao amarrados aos
-            alunos.
-          </DialogDescription>
-        </DialogHeader>
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={<FileText size={18} />}
+      title={isEdit ? "Editar grupo de boletos" : "Novo grupo de boletos"}
+      description="Valor, vencimento e recorrência que ficam amarrados aos alunos vinculados."
+      footer={
+        <>
+          <ModalCancelButton onClick={() => onOpenChange(false)} />
+          <ModalSubmitButton onClick={handleSubmit} busy={isSaving}>
+            {isEdit ? "Salvar alterações" : "Criar grupo"}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        <FormField label="Nome do grupo" required>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Ex.: Mensalidade transporte"
+            autoComplete="off"
+            className={fieldInputClass}
+            style={fieldAccentStyle}
+          />
+        </FormField>
 
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Nome do grupo</Label>
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Ex.: Mensalidade transporte Unifeb"
-            />
-          </div>
+        <FormField
+          label="Descrição"
+          hint="Opcional. Ajuda a identificar a cobrança na listagem."
+        >
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Observações para identificar a cobrança"
+            rows={3}
+            className={`${fieldInputClass} h-auto resize-y py-2.5 leading-relaxed`}
+            style={fieldAccentStyle}
+          />
+        </FormField>
 
-          <div className="space-y-2">
-            <Label>Descricao</Label>
-            <Textarea
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Opcional: observacoes para identificar a cobranca."
-            />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label>Valor (R$)</Label>
-              <Input
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormField label="Valor" required hint="Em reais">
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                R$
+              </span>
+              <input
                 value={amount}
                 onChange={(event) => setAmount(event.target.value)}
-                placeholder="425.00"
+                placeholder="425,00"
                 inputMode="decimal"
+                className={`${fieldInputClass} pl-9 tabular-nums`}
+                style={fieldAccentStyle}
               />
             </div>
+          </FormField>
 
-            <div className="space-y-2">
-              <Label>Dia do vencimento</Label>
-              <Input
-                value={dueDay}
-                onChange={(event) => setDueDay(event.target.value)}
-                placeholder="10"
-                type="number"
-                min="1"
-                max="31"
-              />
-            </div>
+          <FormField label="Vencimento" required hint="Dia do mês">
+            <input
+              value={dueDay}
+              onChange={(event) => setDueDay(event.target.value)}
+              placeholder="10"
+              type="number"
+              min="1"
+              max="31"
+              className={`${fieldInputClass} tabular-nums`}
+              style={fieldAccentStyle}
+            />
+          </FormField>
 
-            <div className="space-y-2">
-              <Label>Recorrencia</Label>
-              <Select
-                value={recurrence}
-                onValueChange={(value) =>
-                  setRecurrence(value as BillingTemplateRecurrence)
-                }
-              >
-                <SelectTrigger className="cursor-pointer">
-                  <SelectValue placeholder="Selecione a recorrencia" />
-                </SelectTrigger>
-                <SelectContent>
-                  {recurrenceOptions.map((option) => (
-                    <SelectItem
-                      key={option}
-                      value={option}
-                      className="cursor-pointer"
-                    >
-                      {billingRecurrenceLabels[option]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              className="cursor-pointer"
+          <FormField label="Recorrência" required>
+            <Select
+              value={recurrence}
+              onValueChange={(value) =>
+                setRecurrence(value as BillingTemplateRecurrence)
+              }
             >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSaving}
-              className="cursor-pointer"
-            >
-              {isSaving
-                ? "Salvando..."
-                : isEdit
-                  ? "Salvar alteracoes"
-                  : "Criar grupo"}
-            </Button>
-          </div>
+              <SelectTrigger className="h-10 w-full cursor-pointer rounded-xl">
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {recurrenceOptions.map((option) => (
+                  <SelectItem
+                    key={option}
+                    value={option}
+                    className="cursor-pointer"
+                  >
+                    {billingRecurrenceLabels[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormField>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </FormModal>
   );
 }

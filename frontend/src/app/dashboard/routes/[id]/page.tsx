@@ -140,7 +140,12 @@ export default function RouteSchedulesPage() {
         search: debouncedSearch,
         active: activeFilter,
       },
-      { enabled: canView && Boolean(routeId) },
+      {
+        enabled: canView && Boolean(routeId),
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
 
   useEffect(() => {
@@ -170,6 +175,16 @@ export default function RouteSchedulesPage() {
 
     return () => controller.abort();
   }, [routeId]);
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows
+      .filter((schedule) => selectedIds.includes(schedule.id))
+      .map(
+        (schedule) =>
+          `${formatTime(schedule.departureTime)} · ${
+            schedule.title || scheduleTypeLabel[schedule.type]
+          }`,
+      );
 
   const columns: Column<Schedule>[] = [
     {
@@ -434,16 +449,15 @@ export default function RouteSchedulesPage() {
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
             busy={deleting}
-            title="Desativar horários?"
             confirmLabel="Desativar"
-            description={
-              <>
-                Você está prestes a desativar{" "}
-                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-                {selectedIds.length === 1 ? "horário" : "horários"}. Os avisos de
-                presença desses horários deixam de ser enviados.
-              </>
+            title={
+              selectedIds.length === 1
+                ? "Desativar este horário?"
+                : `Desativar ${selectedIds.length} horários?`
             }
+            description="O horário sai da grade da rota."
+            items={selectedNames}
+            consequence="Os avisos de presença desse horário deixam de ser enviados aos responsáveis."
           />
         </>
       )}

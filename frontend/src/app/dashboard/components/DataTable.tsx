@@ -3,7 +3,13 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { ChevronLeft, ChevronRight, Pencil } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Pencil,
+} from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -344,16 +350,34 @@ function Pagination({
   lastPage: number;
   onPageChange: (page: number) => void;
 }) {
-  const pages: number[] = [];
-  const start = Math.max(1, Math.min(page - 2, lastPage - 4));
-  const end = Math.min(lastPage, Math.max(page + 2, 5));
+  // Sempre mostra primeira e última página; o miolo acompanha a página atual e
+  // as reticências indicam o salto. Sem isso, em 50 páginas não havia como
+  // chegar ao fim sem clicar 48 vezes.
+  const windowSize = 5;
+  const half = Math.floor(windowSize / 2);
 
-  for (let index = Math.max(1, start); index <= end; index++) {
-    pages.push(index);
+  let start = Math.max(1, page - half);
+  const end = Math.min(lastPage, start + windowSize - 1);
+  start = Math.max(1, end - windowSize + 1);
+
+  const middle: number[] = [];
+  for (let index = start; index <= end; index++) {
+    middle.push(index);
   }
+
+  const showLeftEllipsis = start > 2;
+  const showRightEllipsis = end < lastPage - 1;
 
   return (
     <div className="flex items-center gap-1">
+      <PageButton
+        onClick={() => onPageChange(1)}
+        disabled={page <= 1}
+        label="Primeira página"
+      >
+        <ChevronsLeft size={14} />
+      </PageButton>
+
       <PageButton
         onClick={() => onPageChange(page - 1)}
         disabled={page <= 1}
@@ -362,23 +386,31 @@ function Pagination({
         <ChevronLeft size={14} />
       </PageButton>
 
-      {pages.map((item) => (
-        <button
-          key={item}
-          type="button"
-          onClick={() => onPageChange(item)}
-          aria-current={item === page ? "page" : undefined}
-          className={cn(
-            "h-8 min-w-8 cursor-pointer rounded-lg px-2 text-xs tabular-nums transition",
-            item === page
-              ? "text-white"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-          style={item === page ? { backgroundColor: ACCENT } : undefined}
-        >
-          {item}
-        </button>
-      ))}
+      {start > 1 && (
+        <PageNumber page={1} current={page} onPageChange={onPageChange} />
+      )}
+      {showLeftEllipsis && <Ellipsis />}
+
+      {middle
+        .filter((item) => item !== 1 || start === 1)
+        .filter((item) => item !== lastPage || end === lastPage)
+        .map((item) => (
+          <PageNumber
+            key={item}
+            page={item}
+            current={page}
+            onPageChange={onPageChange}
+          />
+        ))}
+
+      {showRightEllipsis && <Ellipsis />}
+      {end < lastPage && (
+        <PageNumber
+          page={lastPage}
+          current={page}
+          onPageChange={onPageChange}
+        />
+      )}
 
       <PageButton
         onClick={() => onPageChange(page + 1)}
@@ -387,7 +419,56 @@ function Pagination({
       >
         <ChevronRight size={14} />
       </PageButton>
+
+      <PageButton
+        onClick={() => onPageChange(lastPage)}
+        disabled={page >= lastPage}
+        label="Última página"
+      >
+        <ChevronsRight size={14} />
+      </PageButton>
     </div>
+  );
+}
+
+function Ellipsis() {
+  return (
+    <span
+      aria-hidden
+      className="px-1 text-xs text-muted-foreground/60 select-none"
+    >
+      …
+    </span>
+  );
+}
+
+function PageNumber({
+  page,
+  current,
+  onPageChange,
+}: {
+  page: number;
+  current: number;
+  onPageChange: (page: number) => void;
+}) {
+  const active = page === current;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onPageChange(page)}
+      aria-current={active ? "page" : undefined}
+      aria-label={`Página ${page}`}
+      className={cn(
+        "h-8 min-w-8 cursor-pointer rounded-lg px-2 text-xs tabular-nums transition",
+        active
+          ? "text-white"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+      style={active ? { backgroundColor: ACCENT } : undefined}
+    >
+      {page}
+    </button>
   );
 }
 

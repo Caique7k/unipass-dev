@@ -13,6 +13,7 @@ import {
   Patch,
 } from '@nestjs/common';
 import { StudentsService } from './students.service';
+import { FindStudentsDto } from './dto/find-students.dto';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { IdListDto } from 'src/common/dto/id-list.dto';
 import { Roles } from 'src/auth/roles.decorator';
@@ -27,19 +28,13 @@ export class StudentsController {
 
   @Get()
   @Roles('ADMIN', 'DRIVER', 'COORDINATOR')
-  findAll(
-    @Req() req: any,
-    @Query('page') page = 1,
-    @Query('limit') limit = 10,
-    @Query('search') search?: string,
-    @Query('active') active?: string,
-  ) {
+  findAll(@Req() req: any, @Query() query: FindStudentsDto) {
     return this.studentsService.findAll({
       companyId: req.user.companyId,
-      page: Number(page),
-      limit: Number(limit),
-      search,
-      active: active === undefined ? undefined : active === 'true',
+      page: query.page ?? 1,
+      limit: query.limit ?? 10,
+      search: query.search,
+      active: query.active === undefined ? undefined : query.active === 'true',
     });
   }
 

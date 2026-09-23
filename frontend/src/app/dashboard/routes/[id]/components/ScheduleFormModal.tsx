@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { CalendarClock } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  FormModal,
+  ModalCancelButton,
+  ModalSubmitButton,
+} from "../../../components/FormModal";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -302,8 +300,8 @@ export function ScheduleFormModal({
 
       toast.success(
         isEdit
-          ? "Horario atualizado com sucesso."
-          : "Horario criado com sucesso.",
+          ? "Horário atualizado com sucesso."
+          : "Horário criado com sucesso.",
       );
 
       onSuccess();
@@ -318,22 +316,27 @@ export function ScheduleFormModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden border-0 p-0 shadow-2xl sm:max-w-[760px]">
-        <div className="border-b border-[#ff5c00]/10 bg-[#ff5c00]/[0.04] px-6 py-5">
-          <DialogHeader className="gap-1">
-            <DialogTitle className="text-2xl font-bold text-foreground">
-              {isEdit ? "Editar horário" : "Novo horário"}
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              {isEdit
-                ? "Atualize tipo, horário, recorrência e vinculação deste cadastro."
-                : "Defina tipo, horário e dias em que esta rota será atendida."}
-            </DialogDescription>
-          </DialogHeader>
-        </div>
-
-        <div className="unipass-scrollbar min-h-0 space-y-6 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-6">
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="lg"
+      icon={<CalendarClock size={18} />}
+      title={isEdit ? "Editar horário" : "Novo horário"}
+      description={
+        isEdit
+          ? "Atualize tipo, horário, recorrência e vinculação deste cadastro."
+          : "Defina tipo, horário e os dias da semana em que esta rota opera."
+      }
+      footer={
+        <>
+          <ModalCancelButton onClick={() => onOpenChange(false)} />
+          <ModalSubmitButton onClick={handleSubmit} busy={isSaving}>
+            {isEdit ? "Salvar alterações" : "Criar horário"}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+        <div className="space-y-6">
           <div className="grid gap-4 rounded-2xl border border-border/60 bg-card/70 p-4 sm:grid-cols-2">
             <div className="rounded-2xl bg-[#ff5c00]/8 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00]">
@@ -392,7 +395,7 @@ export function ScheduleFormModal({
 
             <div className="space-y-2">
               <Label htmlFor="notify-before" className="text-sm font-medium">
-                Antecedencia do alerta
+                Antecedência do alerta
               </Label>
               <Input
                 id="notify-before"
@@ -406,7 +409,7 @@ export function ScheduleFormModal({
                 }
               />
               <p className="text-xs text-muted-foreground">
-                Defina quantos minutos antes o aluno recebe a notificacao.
+                Defina quantos minutos antes o responsável recebe o aviso.
               </p>
             </div>
           </div>
@@ -498,30 +501,7 @@ export function ScheduleFormModal({
             </div>
           </div>
 
-          <div className="flex flex-col-reverse gap-3 border-t border-border/60 pt-2 sm:flex-row sm:justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              className="w-full cursor-pointer sm:w-auto"
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSaving}
-              className="h-11 w-full cursor-pointer rounded-xl px-6 sm:w-auto"
-            >
-              {isSaving
-                ? "Salvando..."
-                : isEdit
-                  ? "Salvar alterações"
-                  : "Criar horário"}
-            </Button>
-          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+    </FormModal>
   );
 }

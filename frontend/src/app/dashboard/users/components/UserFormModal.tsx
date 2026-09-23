@@ -2,16 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -23,6 +15,12 @@ import { toast } from "sonner";
 import api from "@/services/api";
 import { roleLabels, type UserRole } from "@/lib/permissions";
 import type { ManagedUser } from "../types/user";
+import { AtSign, UsersRound } from "lucide-react";
+import {
+  FormModal,
+  ModalCancelButton,
+  ModalSubmitButton,
+} from "../../components/FormModal";
 
 const companyRoles: UserRole[] = ["ADMIN", "DRIVER", "COORDINATOR", "USER"];
 
@@ -268,22 +266,35 @@ export function UserFormModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden border-0 p-0 shadow-2xl sm:max-w-[620px]">
-        <div className="border-b border-[#ff5c00]/10 bg-[#ff5c00]/[0.04] px-6 py-5">
-          <DialogHeader className="gap-1">
-            <DialogTitle className="text-2xl font-bold text-foreground">
-              {isEdit ? "Editar usuário" : "Novo usuário"}
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              {isEdit
-                ? "Atualize os dados de acesso e mantenha o vínculo com a empresa."
-                : "Crie acessos com domínio fixo da empresa e, para alunos, use um cadastro já existente."}
-            </DialogDescription>
-          </DialogHeader>
-        </div>
-
-        <div className="unipass-scrollbar min-h-0 space-y-6 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-6">
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={<UsersRound size={18} />}
+      title={isEdit ? "Editar usuário" : "Novo usuário"}
+      description={
+        isEdit
+          ? "Atualize os dados de acesso e mantenha o vínculo com a empresa."
+          : "Crie acessos com o domínio fixo da empresa. Para alunos, use um cadastro já existente."
+      }
+      banner={
+        emailDomain ? (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <AtSign size={12} />
+            Todo acesso desta empresa usa o domínio{" "}
+            <span className="font-medium text-foreground">@{emailDomain}</span>
+          </p>
+        ) : undefined
+      }
+      footer={
+        <>
+          <ModalCancelButton onClick={() => onOpenChange(false)} />
+          <ModalSubmitButton onClick={handleSubmit} busy={saving}>
+            {isEdit ? "Salvar alterações" : "Criar usuário"}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+        <div className="space-y-6">
           <div className="grid gap-4 rounded-2xl border border-border/60 bg-card/70 p-4 sm:grid-cols-2">
             <div className="rounded-2xl bg-[#ff5c00]/8 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00]">
@@ -449,21 +460,7 @@ export function UserFormModal({
             </p>
           </div>
 
-          <div className="flex flex-col-reverse gap-3 border-t border-border/60 pt-2 sm:flex-row sm:justify-end">
-            <Button
-              onClick={handleSubmit}
-              disabled={saving}
-              className="h-11 w-full cursor-pointer rounded-xl px-6 sm:w-auto"
-            >
-              {saving
-                ? "Salvando..."
-                : isEdit
-                  ? "Salvar alterações"
-                  : "Criar usuário"}
-            </Button>
-          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+    </FormModal>
   );
 }

@@ -55,12 +55,20 @@ export default function StudentsPage() {
         search: debouncedSearch,
         active: activeFilter,
       },
-      { enabled: canView },
+      {
+        enabled: canView,
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
 
   // As opções do formulário só começam a carregar quando o modal é aberto pela
   // primeira vez — e ficam em cache depois disso.
   const options = useStudentFormOptions(canManage && formOpen);
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows.filter((student) => selectedIds.includes(student.id)).map((student) => student.name);
 
   const columns: Column<Student>[] = [
     {
@@ -341,16 +349,15 @@ export default function StudentsPage() {
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
             busy={deleting}
-            title="Desativar alunos?"
             confirmLabel="Desativar"
-            description={
-              <>
-                Você está prestes a desativar{" "}
-                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-                {selectedIds.length === 1 ? "aluno" : "alunos"}. As TAGs deles
-                deixam de ser aceitas no embarque.
-              </>
+            title={
+              selectedIds.length === 1
+                ? "Desativar este aluno?"
+                : `Desativar ${selectedIds.length} alunos?`
             }
+            description="O aluno sai das listagens e dos relatórios da operação."
+            items={selectedNames}
+            consequence="A TAG dele deixa de ser aceita no embarque: a próxima leitura vira um evento negado."
           />
         </>
       )}

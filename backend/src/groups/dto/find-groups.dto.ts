@@ -1,16 +1,15 @@
-import { IsBooleanString, IsNumberString, IsOptional, IsString } from 'class-validator';
+import { IsBooleanString, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
-export class FindGroupsDto {
-  @IsOptional()
-  @IsNumberString()
-  page?: string;
+const trimString = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
 
+export class FindGroupsDto extends PaginationQueryDto {
   @IsOptional()
-  @IsNumberString()
-  limit?: string;
-
-  @IsOptional()
+  @Transform(trimString)
   @IsString()
+  @MaxLength(80)
   search?: string;
 
   @IsOptional()

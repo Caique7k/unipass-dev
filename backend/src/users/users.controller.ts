@@ -15,6 +15,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { IdListDto } from 'src/common/dto/id-list.dto';
 import { UsersService } from './users.service';
+import { FindUsersDto } from './dto/find-users.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -25,20 +26,13 @@ export class UsersController {
 
   @Get()
   @Roles('ADMIN')
-  findAll(
-    @Req() req: any,
-    @Query('search') search?: string,
-    @Query('active') active?: string,
-    @Query('role') role?: string,
-    @Query('page') page = '1',
-    @Query('limit') limit = '10',
-  ) {
+  findAll(@Req() req: any, @Query() query: FindUsersDto) {
     return this.usersService.findAll(req.user, {
-      search,
-      active: active === undefined ? undefined : active === 'true',
-      role,
-      page: Number(page),
-      limit: Number(limit),
+      search: query.search,
+      active: query.active === undefined ? undefined : query.active === 'true',
+      role: query.role,
+      page: query.page ?? 1,
+      limit: query.limit ?? 10,
     });
   }
 

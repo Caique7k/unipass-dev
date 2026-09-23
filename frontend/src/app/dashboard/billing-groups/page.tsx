@@ -64,8 +64,16 @@ export default function BillingGroupsPage() {
         search: debouncedSearch,
         active: activeFilter,
       },
-      { enabled: canView },
+      {
+        enabled: canView,
+        // Se a página deixou de existir (último item da página foi desativado),
+        // volta para a última página válida em vez de mostrar tabela vazia.
+        onPageOutOfRange: setPage,
+      },
     );
+
+  // Nomes dos selecionados, para a confirmação mostrar o que será afetado.
+  const selectedNames = rows.filter((group) => selectedIds.includes(group.id)).map((group) => group.name);
 
   const columns: Column<BillingGroup>[] = [
     {
@@ -316,16 +324,15 @@ export default function BillingGroupsPage() {
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
             busy={deleting}
-            title="Desativar grupos de boletos?"
             confirmLabel="Desativar"
-            description={
-              <>
-                Você está prestes a desativar{" "}
-                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
-                {selectedIds.length === 1 ? "grupo" : "grupos"}. As cobranças já
-                emitidas continuam valendo.
-              </>
+            title={
+              selectedIds.length === 1
+                ? "Desativar este grupo de boletos?"
+                : `Desativar ${selectedIds.length} grupos de boletos?`
             }
+            description="O grupo deixa de gerar novas cobranças para os alunos vinculados."
+            items={selectedNames}
+            consequence="As cobranças já emitidas continuam valendo e seguem no acompanhamento."
           />
         </>
       )}

@@ -2,18 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { Check, ChevronsUpDown } from "lucide-react";
-
+import { Check, ChevronsUpDown, SmartphoneNfc } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  FormField,
+  FormModal,
+  ModalCancelButton,
+  ModalSubmitButton,
+  fieldAccentStyle,
+  fieldInputClass,
+} from "../../components/FormModal";
 
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import api from "@/services/api";
 import { toast } from "sonner";
@@ -162,164 +160,164 @@ export function DeviceModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] flex-col overflow-hidden border-0 p-0 shadow-2xl sm:max-w-[620px]">
-        <div className="border-b border-[#ff5c00]/10 bg-[#ff5c00]/[0.04] px-6 py-5">
-          <DialogHeader className="gap-1">
-            <DialogTitle className="text-2xl font-bold text-foreground">
-              {isEditing ? "Alterar ônibus do dispositivo" : "Parear dispositivo"}
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              {isEditing
-                ? "Atualize o ônibus vinculado a este UniHub."
-                : "Informe o código temporário e escolha o ônibus para concluir o pareamento."}
-            </DialogDescription>
-          </DialogHeader>
-        </div>
+    <FormModal
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={<SmartphoneNfc size={18} />}
+      title={isEditing ? "Trocar ônibus do UniHub" : "Parear dispositivo"}
+      description={
+        isEditing
+          ? "Troque o ônibus associado sem alterar o dispositivo."
+          : "Use o código temporário exibido na tela do UniHub para concluir o pareamento."
+      }
+      footer={
+        <>
+          <ModalCancelButton onClick={() => onOpenChange(false)} />
+          <ModalSubmitButton
+            onClick={handleSubmit}
+            busy={loading}
+            disabled={loadingBuses || !hasBuses}
+          >
+            {isEditing ? "Salvar ônibus" : "Parear dispositivo"}
+          </ModalSubmitButton>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        {!isEditing && (
+          <FormField
+            label="Código temporário"
+            required
+            hint="Os 6 caracteres que aparecem na tela do dispositivo. Vale por 10 minutos."
+          >
+            <input
+              placeholder="Ex.: A1B2C3"
+              value={pairingCode}
+              onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
+              autoComplete="off"
+              className={`${fieldInputClass} font-mono tracking-[0.3em]`}
+              style={fieldAccentStyle}
+            />
+          </FormField>
+        )}
 
-        <div className="unipass-scrollbar min-h-0 space-y-6 overflow-y-auto bg-background px-4 py-4 sm:px-6 sm:py-6">
-          <div className="grid gap-4 rounded-2xl border border-border/60 bg-card/70 p-4 sm:grid-cols-2">
-            <div className="rounded-2xl bg-[#ff5c00]/8 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00]">
-                UniHub
-              </p>
-              <p className="mt-2 text-sm font-medium text-foreground">
-                {isEditing ? "Edição de vinculação" : "Novo pareamento"}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {isEditing
-                  ? "Troque o ônibus associado sem alterar o dispositivo."
-                  : "Use o código exibido no dispositivo para concluir o processo."}
-              </p>
-            </div>
+        <FormField
+          label="Ônibus"
+          required
+          error={
+            !hasBuses && !loadingBuses
+              ? "Cadastre um ônibus primeiro para vincular este dispositivo."
+              : undefined
+          }
+          hint={
+            hasBuses ? "O dispositivo passa a registrar embarques nesse veículo." : undefined
+          }
+        >
+          <div className="relative">
+            <button
+              type="button"
+              disabled={!hasBuses || loadingBuses}
+              onClick={() => setBusDropdownOpen((prev) => !prev)}
+              className={`${fieldInputClass} flex cursor-pointer items-center justify-between text-left disabled:cursor-not-allowed disabled:opacity-50`}
+              style={fieldAccentStyle}
+            >
+              <span className="truncate">
+                {loadingBuses
+                  ? "Carregando ônibus..."
+                  : selectedBus?.plate || "Selecione um ônibus"}
+              </span>
+              <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
+            </button>
 
-            <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Ônibus selecionado
-              </p>
-              <p className="mt-2 text-base font-semibold text-foreground">
-                {selectedBus?.plate || "Nenhum ônibus escolhido"}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Selecione a placa correta antes de salvar.
-              </p>
-            </div>
-          </div>
+            {busDropdownOpen && hasBuses && (
+              <div className="absolute z-50 mt-2 w-full rounded-2xl border border-border/60 bg-popover p-2 shadow-xl">
+                <input
+                  placeholder="Buscar placa..."
+                  value={busSearch}
+                  onChange={(e) => setBusSearch(e.target.value)}
+                  autoFocus
+                  className={fieldInputClass}
+                  style={fieldAccentStyle}
+                />
 
-          {!isEditing && (
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Código temporário</div>
-              <Input
-                placeholder="Código temporário exibido no IoT"
-                value={pairingCode}
-                onChange={(e) => setPairingCode(e.target.value)}
-                className="h-11 rounded-xl border-border/70 bg-background px-3"
-              />
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <div className="text-sm font-medium">Ônibus</div>
-
-            <div className="relative">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full justify-between rounded-xl border-border/70 bg-background px-3 cursor-pointer"
-                disabled={!hasBuses || loadingBuses}
-                onClick={() => setBusDropdownOpen((prev) => !prev)}
-              >
-                <span className="truncate">
-                  {loadingBuses
-                    ? "Carregando ônibus..."
-                    : selectedBus?.plate || "Selecione um ônibus"}
-                </span>
-                <ChevronsUpDown className="size-4 opacity-60" />
-              </Button>
-
-              {busDropdownOpen && hasBuses && (
-                <div className="absolute z-50 mt-2 w-full rounded-xl border border-border/60 bg-background p-2 shadow-md">
-                  <Input
-                    placeholder="Buscar placa..."
-                    value={busSearch}
-                    onChange={(e) => setBusSearch(e.target.value)}
-                    className="h-10 rounded-lg"
-                  />
-
-                  <div className="mt-2 max-h-56 overflow-y-auto">
-                    {filteredBuses.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-muted-foreground">
-                        Nenhum ônibus encontrado.
-                      </div>
-                    ) : (
-                      filteredBuses.map((bus) => (
-                        <button
-                          key={bus.id}
-                          type="button"
-                          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-muted"
-                          onClick={() => {
-                            setBusId(bus.id);
-                            setBusDropdownOpen(false);
-                            setBusSearch("");
-                          }}
-                        >
-                          <span>{bus.plate}</span>
-                          <Check
-                            className={cn(
-                              "size-4",
-                              bus.id === busId ? "opacity-100" : "opacity-0",
-                            )}
-                          />
-                        </button>
-                      ))
-                    )}
-                  </div>
+                <div className="unipass-scrollbar mt-2 max-h-56 overflow-y-auto">
+                  {filteredBuses.length === 0 ? (
+                    <p className="px-3 py-3 text-center text-sm text-muted-foreground">
+                      Nenhum ônibus encontrado.
+                    </p>
+                  ) : (
+                    filteredBuses.map((bus) => (
+                      <button
+                        key={bus.id}
+                        type="button"
+                        className="flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition hover:bg-accent"
+                        onClick={() => {
+                          setBusId(bus.id);
+                          setBusDropdownOpen(false);
+                          setBusSearch("");
+                        }}
+                      >
+                        <span className="tracking-wide">{bus.plate}</span>
+                        <Check
+                          className={cn(
+                            "size-4",
+                            bus.id === busId ? "opacity-100" : "opacity-0",
+                          )}
+                        />
+                      </button>
+                    ))
+                  )}
                 </div>
-              )}
-            </div>
-
-            {!hasBuses && !loadingBuses && (
-              <p className="text-sm text-amber-600">
-                Cadastre um ônibus primeiro para vincular este dispositivo.
-              </p>
+              </div>
             )}
           </div>
+        </FormField>
 
-          {isEditing && (
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Input
-                value={device.hardwareId || ""}
-                disabled
-                className="h-11 rounded-xl"
-              />
-              <Input value={device.code || ""} disabled className="h-11 rounded-xl" />
-              <Input
-                value={device.secret || ""}
-                disabled
-                className="h-11 rounded-xl"
-              />
+        {isEditing && (
+          <div className="space-y-3 rounded-2xl border border-border/50 bg-background/50 p-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+              Credenciais do dispositivo
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <ReadOnlyValue label="Hardware" value={device?.hardwareId} />
+              <ReadOnlyValue label="Código" value={device?.code} />
+              <ReadOnlyValue label="Secret" value={device?.secret} masked />
             </div>
-          )}
-
-          {errorMessage && (
-            <p className="text-sm text-red-600">{errorMessage}</p>
-          )}
-
-          <div className="flex flex-col-reverse gap-3 border-t border-border/60 pt-2 sm:flex-row sm:justify-end">
-            <Button
-              onClick={handleSubmit}
-              disabled={loading || loadingBuses || !hasBuses}
-              className="h-11 w-full cursor-pointer rounded-xl px-6 sm:w-auto"
-            >
-              {loading
-                ? "Salvando..."
-                : isEditing
-                  ? "Salvar ônibus"
-                  : "Parear dispositivo"}
-            </Button>
+            <p className="text-xs text-muted-foreground">
+              Geradas no pareamento e usadas pelo firmware. Não são editáveis.
+            </p>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        )}
+
+        {errorMessage && <p className="text-sm text-red-500">{errorMessage}</p>}
+      </div>
+    </FormModal>
+  );
+}
+
+function ReadOnlyValue({
+  label,
+  value,
+  masked = false,
+}: {
+  label: string;
+  value?: string | null;
+  masked?: boolean;
+}) {
+  const display = value
+    ? masked
+      ? `${value.slice(0, 4)}${"•".repeat(Math.max(value.length - 4, 0))}`
+      : value
+    : "—";
+
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </p>
+      <p className="truncate font-mono text-xs" title={value ?? undefined}>
+        {display}
+      </p>
+    </div>
   );
 }

@@ -3,16 +3,6 @@
 import type { ReactNode } from "react";
 import { motion } from "motion/react";
 import { Loader2, Search, X } from "lucide-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { ACCENT, Panel, SectionLabel, spring } from "./primitives";
 
@@ -266,60 +256,6 @@ export function StatusBadge({
   );
 }
 
-/* ------------------------------------------------------------- confirmação */
-
-export function ConfirmDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  title,
-  description,
-  confirmLabel = "Confirmar",
-  cancelLabel = "Cancelar",
-  tone = "danger",
-  busy = false,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-  title: string;
-  description: ReactNode;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  tone?: "danger" | "default";
-  busy?: boolean;
-}) {
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="rounded-3xl">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription className="text-sm text-muted-foreground">
-            {description}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer rounded-xl">
-            {cancelLabel}
-          </AlertDialogCancel>
-          <AlertDialogAction
-            disabled={busy}
-            onClick={onConfirm}
-            className={cn(
-              "cursor-pointer rounded-xl",
-              tone === "danger" && "bg-red-600 hover:bg-red-700",
-            )}
-          >
-            {busy && <Loader2 size={13} className="mr-1.5 animate-spin" />}
-            {confirmLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 /* -------------------------------------------------------------- feedback  */
 
 export function ErrorState({
@@ -355,4 +291,5 @@ export function FetchingBar({ active }: { active: boolean }) {
   );
 }
 
+export { ConfirmDialog } from "./ConfirmDialog";
 export { spring };
