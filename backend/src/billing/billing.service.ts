@@ -8,6 +8,12 @@ import {
   Prisma,
   UserRole,
 } from '@prisma/client';
+import {
+  CLOSED_CHARGE_STATUSES,
+  OPEN_CHARGE_STATUSES,
+  OVERDUE_IGNORED_STATUSES,
+  buildOverdueChargeWhere,
+} from './billing-charge-status.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { BillingWebhookService } from './billing-webhook.service';
 import type { BillingChargeStatusFilter } from './dto/find-billing-charges.dto';
@@ -16,23 +22,6 @@ import { UpdateCompanyBillingSettingsDto } from './dto/update-company-billing-se
 
 type BillingAccessScope = 'company' | 'self';
 
-const CLOSED_CHARGE_STATUSES: BillingChargeStatus[] = [
-  BillingChargeStatus.PAID,
-  BillingChargeStatus.CANCELLED,
-];
-
-const OVERDUE_IGNORED_STATUSES: BillingChargeStatus[] = [
-  BillingChargeStatus.PAID,
-  BillingChargeStatus.CANCELLED,
-  BillingChargeStatus.FAILED,
-];
-
-const OPEN_CHARGE_STATUSES: BillingChargeStatus[] = [
-  BillingChargeStatus.DRAFT,
-  BillingChargeStatus.SCHEDULED,
-  BillingChargeStatus.ISSUED,
-  BillingChargeStatus.SENT,
-];
 
 const billingChargeRelations = {
   ownerUser: {
@@ -821,21 +810,7 @@ export class BillingService {
   }
 
   private buildOverdueChargeWhere(now: Date) {
-    return {
-      OR: [
-        {
-          status: BillingChargeStatus.OVERDUE,
-        },
-        {
-          dueDate: {
-            lt: now,
-          },
-          status: {
-            in: OPEN_CHARGE_STATUSES,
-          },
-        },
-      ],
-    } satisfies Prisma.BillingChargeWhereInput;
+    return buildOverdueChargeWhere(now);
   }
 
   private mapCharge(charge: BillingChargeWithRelations, now: Date) {

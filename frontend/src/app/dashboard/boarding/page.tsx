@@ -1,34 +1,18 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, Route, Search, Truck, UserCheck, UserX } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion } from "motion/react";
+import {
+  ChevronDown,
+  Clock,
+  LogIn,
+  RefreshCw,
+  Truck,
+  UserCheck,
+  UserX,
+} from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
-import { PageTableSkeleton } from "@/app/dashboard/components/DashboardSkeletons";
 import { AccessDenied } from "@/components/AccessDenied";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
 import {
   Select,
   SelectContent,
@@ -36,17 +20,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { api } from "@/services/api";
+import { cn } from "@/lib/utils";
+import { DataTable, type Column } from "../components/DataTable";
+import {
+  ErrorState,
+  GhostButton,
+  PageHeader,
+  SearchField,
+  StatusBadge,
+  Toolbar,
+} from "../components/page-kit";
+import {
+  ACCENT,
+  AnimatedNumber,
+  EmptyState,
+  Panel,
+  SectionLabel,
+} from "../components/primitives";
 
 const BOARDED_PAGE_SIZE = 5;
+const REFRESH_INTERVAL_MS = 30000;
+
+type BoardedStudent = {
+  id: string;
+  name: string;
+  registration: string;
+  group: { id: string; name: string } | null;
+  firstBoardingAt: string;
+  secondBoardingAt: string;
+  busFilterKey: string;
+  busPlate: string;
+  capacity: number | null;
+  deviceCode: string | null;
+  deviceName: string | null;
+};
+
+type WaitingStudent = {
+  id: string;
+  name: string;
+  registration: string;
+  email: string | null;
+  phone: string | null;
+  group: { id: string; name: string } | null;
+  rfidTag: string | null;
+  routeNames: string[];
+  firstBoardingAt: string;
+  firstDeviceCode: string | null;
+  firstDeviceName: string | null;
+  firstBusPlate: string;
+};
 
 type BoardingOverviewResponse = {
   dateKey: string;
@@ -57,53 +80,9 @@ type BoardingOverviewResponse = {
     secondBoardingDone: number;
     busesWithSecondBoarding: number;
   };
-  busOptions: Array<{
-    value: string;
-    label: string;
-  }>;
-  boardedStudents: Array<{
-    id: string;
-    name: string;
-    registration: string;
-    email: string | null;
-    phone: string | null;
-    group: {
-      id: string;
-      name: string;
-    } | null;
-    rfidTag: string | null;
-    routeNames: string[];
-    boardingCountToday: number;
-    firstBoardingAt: string;
-    secondBoardingAt: string;
-    busId: string | null;
-    busFilterKey: string;
-    busPlate: string;
-    capacity: number | null;
-    deviceId: string;
-    deviceCode: string | null;
-    deviceName: string | null;
-  }>;
-  notBoardedStudents: Array<{
-    id: string;
-    name: string;
-    registration: string;
-    email: string | null;
-    phone: string | null;
-    group: {
-      id: string;
-      name: string;
-    } | null;
-    rfidTag: string | null;
-    routeNames: string[];
-    boardingCountToday: number;
-    firstBoardingAt: string;
-    firstDeviceId: string;
-    firstDeviceCode: string | null;
-    firstDeviceName: string | null;
-    firstBusId: string | null;
-    firstBusPlate: string;
-  }>;
+  busOptions: Array<{ value: string; label: string }>;
+  boardedStudents: BoardedStudent[];
+  notBoardedStudents: WaitingStudent[];
 };
 
 function formatTime(value: string) {
@@ -114,18 +93,15 @@ function formatTime(value: string) {
 }
 
 function formatDateKey(dateKey: string) {
-  if (!dateKey) {
-    return "--/--/----";
-  }
+  if (!dateKey) return "--/--/----";
 
   const [year, month, day] = dateKey.split("-");
+
   return `${day}/${month}/${year}`;
 }
 
 function formatLastUpdated(value: string | null) {
-  if (!value) {
-    return "Atualizando...";
-  }
+  if (!value) return "—";
 
   return new Intl.DateTimeFormat("pt-BR", {
     hour: "2-digit",
@@ -146,61 +122,151 @@ export default function BoardingPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notBoardedSearch, setNotBoardedSearch] = useState("");
+
+  const [waitingSearch, setWaitingSearch] = useState("");
   const [boardedSearch, setBoardedSearch] = useState("");
-  const [selectedBusFilter, setSelectedBusFilter] = useState("all");
+  const [busFilter, setBusFilter] = useState("all");
   const [boardedPage, setBoardedPage] = useState(1);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const loadOverview = useCallback(
-    async (mode: "initial" | "refresh" = "refresh") => {
-      if (!canView) {
-        return;
-      }
+  const loadOverview = useCallback(async () => {
+    if (!canView) return;
 
-      if (mode === "initial") {
-        setLoading(true);
-      } else {
-        setRefreshing(true);
-      }
+    setRefreshing(true);
 
-      try {
-        const response = await api.get<BoardingOverviewResponse>(
-          "/transport/boarding-overview/today",
-        );
+    try {
+      const response = await api.get<BoardingOverviewResponse>(
+        "/transport/boarding-overview/today",
+      );
 
-        setData(response.data);
-        setError(null);
-      } catch {
-        setError("Não foi possível carregar o painel de embarques.");
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [canView],
-  );
+      setData(response.data);
+      setError(null);
+    } catch {
+      setError("Não foi possível carregar o painel de embarques.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [canView]);
 
   useEffect(() => {
-    void loadOverview("initial");
+    void Promise.resolve().then(() => loadOverview());
   }, [loadOverview]);
 
   useEffect(() => {
-    if (!canView) {
-      return;
-    }
+    if (!canView) return;
 
     const intervalId = window.setInterval(() => {
-      void loadOverview("refresh");
-    }, 30000);
+      if (document.visibilityState === "visible") {
+        void loadOverview();
+      }
+    }, REFRESH_INTERVAL_MS);
 
-    return () => {
-      window.clearInterval(intervalId);
-    };
+    return () => window.clearInterval(intervalId);
   }, [canView, loadOverview]);
 
-  useEffect(() => {
-    setBoardedPage(1);
-  }, [boardedSearch, selectedBusFilter, data?.generatedAt]);
+  const filteredWaiting = useMemo(
+    () =>
+      data?.notBoardedStudents.filter((student) =>
+        matchesSearch(
+          `${student.name} ${student.registration} ${student.group?.name ?? ""}`,
+          waitingSearch,
+        ),
+      ) ?? [],
+    [data, waitingSearch],
+  );
+
+  const filteredBoarded = useMemo(
+    () =>
+      data?.boardedStudents.filter((student) => {
+        const matchesName = matchesSearch(
+          `${student.name} ${student.registration} ${student.group?.name ?? ""}`,
+          boardedSearch,
+        );
+        const matchesBus =
+          busFilter === "all" || student.busFilterKey === busFilter;
+
+        return matchesName && matchesBus;
+      }) ?? [],
+    [data, boardedSearch, busFilter],
+  );
+
+  const boardedLastPage = Math.max(
+    1,
+    Math.ceil(filteredBoarded.length / BOARDED_PAGE_SIZE),
+  );
+  // A página é limitada no cálculo em vez de reajustada por efeito: evita um
+  // render extra sempre que um filtro muda.
+  const currentBoardedPage = Math.min(boardedPage, boardedLastPage);
+  const pageStart = (currentBoardedPage - 1) * BOARDED_PAGE_SIZE;
+  const paginatedBoarded = filteredBoarded.slice(
+    pageStart,
+    pageStart + BOARDED_PAGE_SIZE,
+  );
+
+  const selectedBusLabel =
+    busFilter === "all"
+      ? "Todos os ônibus"
+      : (data?.busOptions.find((option) => option.value === busFilter)?.label ??
+        "Todos os ônibus");
+
+  const columns: Column<BoardedStudent>[] = [
+    {
+      key: "name",
+      header: "Aluno",
+      cell: (student) => (
+        <div className="min-w-0">
+          <p className="truncate font-medium">{student.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {student.registration}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "bus",
+      header: "Ônibus",
+      hideBelow: "sm",
+      cell: (student) => (
+        <div className="min-w-0">
+          <p className="truncate tracking-wide">{student.busPlate}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {student.deviceName || student.deviceCode || "UniHub"}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "first",
+      header: "1º embarque",
+      hideBelow: "md",
+      cell: (student) => (
+        <span className="tabular-nums text-muted-foreground">
+          {formatTime(student.firstBoardingAt)}
+        </span>
+      ),
+    },
+    {
+      key: "second",
+      header: "2º embarque",
+      cell: (student) => (
+        <StatusBadge tone="success">
+          {formatTime(student.secondBoardingAt)}
+        </StatusBadge>
+      ),
+    },
+    {
+      key: "group",
+      header: "Grupo",
+      hideBelow: "lg",
+      cell: (student) =>
+        student.group?.name ? (
+          <StatusBadge>{student.group.name}</StatusBadge>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+  ];
 
   if (!canView) {
     return (
@@ -208,424 +274,296 @@ export default function BoardingPage() {
     );
   }
 
-  if (loading) {
-    return <PageTableSkeleton showAction={false} compact />;
-  }
-
-  const filteredNotBoardedStudents =
-    data?.notBoardedStudents.filter((student) =>
-      matchesSearch(
-        `${student.name} ${student.registration} ${student.group?.name ?? ""}`,
-        notBoardedSearch,
-      ),
-    ) ?? [];
-
-  const filteredBoardedStudents =
-    data?.boardedStudents.filter((student) => {
-      const matchesName = matchesSearch(
-        `${student.name} ${student.registration} ${student.group?.name ?? ""}`,
-        boardedSearch,
-      );
-      const matchesBus =
-        selectedBusFilter === "all" || student.busFilterKey === selectedBusFilter;
-
-      return matchesName && matchesBus;
-    }) ?? [];
-
-  const boardedLastPage = Math.max(
-    1,
-    Math.ceil(filteredBoardedStudents.length / BOARDED_PAGE_SIZE),
-  );
-  const currentBoardedPage = Math.min(boardedPage, boardedLastPage);
-  const boardedPageStart = (currentBoardedPage - 1) * BOARDED_PAGE_SIZE;
-  const paginatedBoardedStudents = filteredBoardedStudents.slice(
-    boardedPageStart,
-    boardedPageStart + BOARDED_PAGE_SIZE,
-  );
-  const selectedBusLabel =
-    selectedBusFilter === "all"
-      ? "Todos os ônibus"
-      : data?.busOptions.find((option) => option.value === selectedBusFilter)
-          ?.label ?? "Todos os ônibus";
+  const summary = data?.summary;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Retorno do dia</h1>
-          <p className="text-sm text-muted-foreground">
-            Alunos com 1 boarding aguardando a volta e alunos com 2 boarding ja
-            embarcados para ir embora.
-          </p>
-        </div>
-
-        <div className="flex flex-col items-start gap-2 md:items-end">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-            Referencia: {formatDateKey(data?.dateKey ?? "")}
-          </p>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">
-              Atualizado as {formatLastUpdated(data?.generatedAt ?? null)}
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow={`Referência ${formatDateKey(data?.dateKey ?? "")}`}
+        title="Retorno do dia"
+        description="O 1º embarque é a ida. O 2º embarque do mesmo dia é lido como a volta para casa."
+        actions={
+          <GhostButton
+            onClick={() => void loadOverview()}
+            disabled={refreshing}
+          >
+            <RefreshCw size={13} className={cn(refreshing && "animate-spin")} />
+            <span className="tabular-nums text-muted-foreground">
+              {formatLastUpdated(data?.generatedAt ?? null)}
             </span>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void loadOverview("refresh")}
-              disabled={refreshing}
-              className="cursor-pointer"
-            >
-              <RefreshCw
-                className={`mr-2 size-4 ${refreshing ? "animate-spin" : ""}`}
-              />
-              Atualizar
-            </Button>
-          </div>
-        </div>
-      </div>
+          </GhostButton>
+        }
+      />
 
       {error && (
-        <Card className="border-amber-300/60 bg-amber-50/70 py-4">
-          <CardContent className="pt-0 text-sm text-amber-900">
-            {error}
-          </CardContent>
-        </Card>
+        <ErrorState message={error} onRetry={() => void loadOverview()} />
       )}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          title="Com primeiro boarding"
-          value={String(data?.summary.studentsWithFirstBoarding ?? 0)}
-          description="Alunos que ja registraram a ida hoje"
-          icon={<Route className="size-5" />}
+          label="Com primeiro embarque"
+          value={summary?.studentsWithFirstBoarding ?? 0}
+          hint="Alunos que já registraram a ida hoje"
+          icon={<LogIn size={15} />}
+          loading={loading}
         />
         <SummaryCard
-          title="Aguardando volta"
-          value={String(data?.summary.waitingSecondBoarding ?? 0)}
-          description="Alunos com apenas 1 boarding no dia"
-          icon={<UserX className="size-5" />}
+          label="Aguardando a volta"
+          value={summary?.waitingSecondBoarding ?? 0}
+          hint="Com apenas 1 embarque no dia"
+          icon={<UserX size={15} />}
+          loading={loading}
         />
         <SummaryCard
-          title="Embarcaram na volta"
-          value={String(data?.summary.secondBoardingDone ?? 0)}
-          description="Alunos com 2 boarding ou mais no dia"
-          icon={<UserCheck className="size-5" />}
+          label="Embarcaram na volta"
+          value={summary?.secondBoardingDone ?? 0}
+          hint="Com 2 embarques ou mais no dia"
+          icon={<UserCheck size={15} />}
+          loading={loading}
         />
         <SummaryCard
-          title="Ônibus da volta"
-          value={String(data?.summary.busesWithSecondBoarding ?? 0)}
-          description="Veiculos com segundo boarding registrado"
-          icon={<Truck className="size-5" />}
+          label="Ônibus da volta"
+          value={summary?.busesWithSecondBoarding ?? 0}
+          hint="Veículos com segundo embarque"
+          icon={<Truck size={15} />}
+          loading={loading}
+        />
+      </div>
+
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
+          <h2 className="text-sm font-semibold tracking-tight">
+            Embarcaram na volta
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            {filteredBoarded.length}{" "}
+            {filteredBoarded.length === 1 ? "aluno" : "alunos"} com volta
+            registrada
+          </span>
+        </div>
+
+        <Toolbar>
+          <SearchField
+            value={boardedSearch}
+            onChange={(value) => {
+              setBoardedSearch(value);
+              setBoardedPage(1);
+            }}
+            placeholder="Buscar por nome ou matrícula..."
+          />
+
+          <Select
+            value={busFilter}
+            onValueChange={(value) => {
+              setBusFilter(value ?? "all");
+              setBoardedPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-full rounded-xl md:w-56">
+              {/* O rótulo vai explícito: sem isso o gatilho mostra o valor cru. */}
+              <SelectValue placeholder="Filtrar por ônibus">
+                {selectedBusLabel}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os ônibus</SelectItem>
+              {(data?.busOptions ?? []).map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Toolbar>
+
+        <DataTable
+          rows={paginatedBoarded}
+          columns={columns}
+          getRowId={(student) => student.id}
+          loading={loading}
+          isFetching={refreshing && !loading}
+          page={currentBoardedPage}
+          lastPage={boardedLastPage}
+          total={filteredBoarded.length}
+          onPageChange={setBoardedPage}
+          skeletonRows={5}
+          emptyIcon={<UserCheck size={22} />}
+          emptyTitle="Nenhum aluno com a volta registrada"
+          emptyDescription={
+            boardedSearch || busFilter !== "all"
+              ? "Ajuste a busca ou o filtro de ônibus."
+              : "Assim que um aluno passar a TAG pela segunda vez hoje, ele aparece aqui."
+          }
         />
       </section>
 
-      <Card className="py-5">
-        <CardHeader className="pb-0">
-          <CardTitle>Embarcaram na volta</CardTitle>
-          <CardDescription>
-            Tabela com alunos que ja atingiram o segundo boarding do dia, com
-            filtro por nome e por ônibus.
-          </CardDescription>
-        </CardHeader>
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
+          <h2 className="text-sm font-semibold tracking-tight">
+            Aguardando segundo embarque
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            {filteredWaiting.length}{" "}
+            {filteredWaiting.length === 1 ? "aluno" : "alunos"} aguardando
+          </span>
+        </div>
 
-        <CardContent className="space-y-4 pt-0">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex w-full flex-col gap-3 md:flex-row">
-              <div className="relative w-full max-w-md">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={boardedSearch}
-                  onChange={(event) => setBoardedSearch(event.target.value)}
-                  placeholder="Buscar por nome ou matricula..."
-                  className="pl-9"
-                />
-              </div>
+        <Toolbar>
+          <SearchField
+            value={waitingSearch}
+            onChange={setWaitingSearch}
+            placeholder="Buscar por nome ou matrícula..."
+          />
+        </Toolbar>
 
-              <Select
-                value={selectedBusFilter}
-                onValueChange={(value) => setSelectedBusFilter(value ?? "all")}
-              >
-                <SelectTrigger className="w-full md:w-64">
-                  <SelectValue placeholder="Filtrar por ônibus">
-                    {selectedBusLabel}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os ônibus</SelectItem>
-                  {(data?.busOptions ?? []).map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <p className="text-sm text-muted-foreground">
-              {filteredBoardedStudents.length} aluno(s) com volta registrada
-            </p>
-          </div>
-
-          {paginatedBoardedStudents.length > 0 ? (
-            <>
-              <div className="rounded-2xl border border-border/60">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Aluno</TableHead>
-                      <TableHead>Matrícula</TableHead>
-                      <TableHead>Ônibus</TableHead>
-                      <TableHead>1o boarding</TableHead>
-                      <TableHead>2o boarding</TableHead>
-                      <TableHead>Grupo</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedBoardedStudents.map((student) => (
-                      <TableRow key={student.id}>
-                        <TableCell>
-                          <div className="min-w-[180px]">
-                            <p className="font-medium">{student.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {student.deviceName || student.deviceCode || "UniHub"}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>{student.registration}</TableCell>
-                        <TableCell>
-                          <div className="min-w-[160px]">
-                            <p>{student.busPlate}</p>
-                            <p className="text-xs text-muted-foreground">
-                              Capacidade {student.capacity ?? "--"}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>{formatTime(student.firstBoardingAt)}</TableCell>
-                        <TableCell>
-                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
-                          {formatTime(student.secondBoardingAt)}
-                        </span>
-                        </TableCell>
-                        <TableCell>{student.group?.name || "--"}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {boardedLastPage > 1 && (
-                <Pagination>
-                  <PaginationContent>
-                    <PaginationItem>
-                      <PaginationPrevious
-                        onClick={() =>
-                          setBoardedPage((current) => Math.max(1, current - 1))
-                        }
-                        disabled={currentBoardedPage === 1}
-                      />
-                    </PaginationItem>
-
-                    {Array.from({ length: boardedLastPage }, (_, index) => index + 1).map(
-                      (pageNumber) => (
-                        <PaginationItem key={pageNumber}>
-                          <PaginationLink
-                            isActive={pageNumber === currentBoardedPage}
-                            onClick={() => setBoardedPage(pageNumber)}
-                          >
-                            {pageNumber}
-                          </PaginationLink>
-                        </PaginationItem>
-                      ),
-                    )}
-
-                    <PaginationItem>
-                      <PaginationNext
-                        onClick={() =>
-                          setBoardedPage((current) =>
-                            Math.min(boardedLastPage, current + 1),
-                          )
-                        }
-                        disabled={currentBoardedPage === boardedLastPage}
-                      />
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
-              )}
-            </>
-          ) : (
+        {filteredWaiting.length === 0 ? (
+          <Panel>
             <EmptyState
-              title="Nenhum aluno encontrado na tabela"
-              description="Ajuste a busca ou o filtro de ônibus, ou aguarde o segundo boarding dos alunos."
+              icon={<Clock size={22} />}
+              title="Nenhum aluno aguardando a volta"
+              description="Quando o primeiro embarque acontecer, o aluno aparece aqui até registrar a volta."
             />
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="py-5">
-        <CardHeader className="pb-0">
-          <CardTitle>Aguardando segundo boarding</CardTitle>
-          <CardDescription>
-            Esta lista mostra apenas alunos que ja tiveram o primeiro boarding e
-            ainda não registraram o segundo boarding da volta.
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-4 pt-0">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="relative w-full max-w-md">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={notBoardedSearch}
-                onChange={(event) => setNotBoardedSearch(event.target.value)}
-                placeholder="Buscar por nome ou matricula..."
-                className="pl-9"
+          </Panel>
+        ) : (
+          <div className="unipass-scrollbar max-h-[34rem] space-y-2 overflow-y-auto pr-1">
+            {filteredWaiting.map((student) => (
+              <WaitingRow
+                key={student.id}
+                student={student}
+                expanded={expandedId === student.id}
+                onToggle={() =>
+                  setExpandedId((current) =>
+                    current === student.id ? null : student.id,
+                  )
+                }
               />
-            </div>
-
-            <p className="text-sm text-muted-foreground">
-              {filteredNotBoardedStudents.length} aluno(s) aguardando a volta
-            </p>
+            ))}
           </div>
-
-          {filteredNotBoardedStudents.length > 0 ? (
-            <div className="max-h-[34rem] overflow-y-auto pr-2">
-              <Accordion className="gap-2">
-                {filteredNotBoardedStudents.map((student) => (
-                  <AccordionItem
-                    key={student.id}
-                    value={student.id}
-                    className="rounded-2xl border border-border/60 px-4"
-                  >
-                    <AccordionTrigger className="cursor-pointer py-5 no-underline hover:no-underline">
-                      <div className="flex min-w-0 flex-1 flex-col gap-2 pr-3 text-left md:flex-row md:items-center md:justify-between">
-                        <div className="min-w-0">
-                          <span className="block truncate text-base font-semibold text-foreground">
-                            {student.name}
-                          </span>
-                          <span className="text-sm text-muted-foreground">
-                            Matrícula {student.registration}
-                            {student.group ? ` - ${student.group.name}` : ""}
-                          </span>
-                        </div>
-
-                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
-                          1o boarding as {formatTime(student.firstBoardingAt)}
-                        </span>
-                      </div>
-                    </AccordionTrigger>
-
-                    <AccordionContent className="pb-5">
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <AccordionDetail
-                          label="Matrícula"
-                          value={student.registration}
-                        />
-                        <AccordionDetail
-                          label="Telefone"
-                          value={student.phone || "Não informado"}
-                        />
-                        <AccordionDetail
-                          label="Email"
-                          value={student.email || "Não informado"}
-                        />
-                        <AccordionDetail
-                          label="TAG"
-                          value={student.rfidTag || "Não vinculada"}
-                        />
-                      </div>
-
-                      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <AccordionDetail
-                          label="Primeiro ônibus"
-                          value={student.firstBusPlate}
-                        />
-                        <AccordionDetail
-                          label="Primeiro UniHub"
-                          value={
-                            student.firstDeviceName ||
-                            student.firstDeviceCode ||
-                            "Não identificado"
-                          }
-                        />
-                        <AccordionDetail
-                          label="Grupo"
-                          value={student.group?.name || "Sem grupo vinculado"}
-                        />
-                        <AccordionDetail
-                          label="Rotas"
-                          value={
-                            student.routeNames.length > 0
-                              ? student.routeNames.join(", ")
-                              : "Sem rota vinculada"
-                          }
-                        />
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                ))}
-              </Accordion>
-            </div>
-          ) : (
-            <EmptyState
-              title="Nenhum aluno aguardando o segundo boarding"
-              description="Quando o primeiro boarding acontecer, o aluno aparece aqui até registrar a volta."
-            />
-          )}
-        </CardContent>
-      </Card>
+        )}
+      </section>
     </div>
   );
 }
 
 function SummaryCard({
-  title,
+  label,
   value,
-  description,
+  hint,
   icon,
+  loading,
 }: {
-  title: string;
-  value: string;
-  description: string;
-  icon: ReactNode;
+  label: string;
+  value: number;
+  hint: string;
+  icon: React.ReactNode;
+  loading: boolean;
 }) {
   return (
-    <Card className="py-5">
-      <CardContent className="flex items-start justify-between gap-4 pt-0">
-        <div>
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="mt-2 text-3xl font-bold tracking-tight">{value}</p>
-          <p className="mt-2 text-xs text-muted-foreground">{description}</p>
-        </div>
-
-        <div className="rounded-2xl bg-[#ffefe5] p-3 text-[#c44a00] dark:bg-[#3a2618] dark:text-[#ffb07a]">
+    <Panel className="p-4">
+      <div className="flex items-start justify-between gap-2">
+        <SectionLabel>{label}</SectionLabel>
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl"
+          style={{ backgroundColor: `${ACCENT}14`, color: ACCENT }}
+        >
           {icon}
-        </div>
-      </CardContent>
-    </Card>
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="mt-3 h-8 w-12 animate-pulse rounded-lg bg-accent" />
+      ) : (
+        <AnimatedNumber
+          value={value}
+          className="mt-3 block text-3xl font-semibold leading-none tracking-tight"
+        />
+      )}
+
+      <p className="mt-2 text-xs text-muted-foreground">{hint}</p>
+    </Panel>
   );
 }
 
-function AccordionDetail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl bg-muted/40 px-4 py-3">
-      <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-1 text-sm text-foreground">{value}</p>
-    </div>
-  );
-}
-
-function EmptyState({
-  title,
-  description,
+function WaitingRow({
+  student,
+  expanded,
+  onToggle,
 }: {
-  title: string;
-  description: string;
+  student: WaitingStudent;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
+  const details = [
+    { label: "Telefone", value: student.phone || "Não informado" },
+    { label: "E-mail", value: student.email || "Não informado" },
+    { label: "TAG", value: student.rfidTag || "Não vinculada" },
+    { label: "Primeiro ônibus", value: student.firstBusPlate },
+    {
+      label: "Primeiro UniHub",
+      value:
+        student.firstDeviceName ||
+        student.firstDeviceCode ||
+        "Não identificado",
+    },
+    { label: "Grupo", value: student.group?.name || "Sem grupo vinculado" },
+    {
+      label: "Rotas",
+      value:
+        student.routeNames.length > 0
+          ? student.routeNames.join(", ")
+          : "Sem rota vinculada",
+    },
+  ];
+
   return (
-    <div className="rounded-2xl border border-dashed border-border/70 bg-background/60 px-4 py-8 text-center">
-      <p className="text-base font-semibold">{title}</p>
-      <p className="mt-2 text-sm text-muted-foreground">{description}</p>
-    </div>
+    <Panel className="overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition hover:bg-accent/30"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{student.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            Matrícula {student.registration}
+            {student.group ? ` · ${student.group.name}` : ""}
+          </p>
+        </div>
+
+        <StatusBadge tone="warning">
+          1º às {formatTime(student.firstBoardingAt)}
+        </StatusBadge>
+
+        <motion.span
+          animate={{ rotate: expanded ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+          className="shrink-0 text-muted-foreground"
+        >
+          <ChevronDown size={15} />
+        </motion.span>
+      </button>
+
+      <motion.div
+        initial={false}
+        animate={{ height: expanded ? "auto" : 0, opacity: expanded ? 1 : 0 }}
+        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+        className="overflow-hidden"
+      >
+        <div className="grid gap-2 border-t border-border/50 px-4 py-3 sm:grid-cols-2 xl:grid-cols-4">
+          {details.map((detail) => (
+            <div
+              key={detail.label}
+              className="rounded-xl bg-accent/40 px-3 py-2"
+            >
+              <SectionLabel>{detail.label}</SectionLabel>
+              <p className="mt-0.5 truncate text-sm" title={detail.value}>
+                {detail.value}
+              </p>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </Panel>
   );
 }

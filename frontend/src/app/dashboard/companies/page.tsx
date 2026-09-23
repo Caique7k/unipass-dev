@@ -1,29 +1,40 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import { motion } from "motion/react";
 import {
   ArrowRightLeft,
-  BookUserIcon,
+  BookUser,
   Building2,
   Bus,
-  CheckCircle2,
   Clock3,
   Cpu,
   Mail,
   Phone,
-  Sparkles,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { AccessDenied } from "@/components/AccessDenied";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { CompanyPlan, companyPlanMeta } from "@/lib/company-plans";
 import api from "@/services/api";
 import { CompaniesSkeleton } from "../components/DashboardSkeletons";
+import {
+  PageHeader,
+  PrimaryButton,
+  SearchField,
+  StatusBadge,
+  Toolbar,
+} from "../components/page-kit";
+import {
+  ACCENT,
+  AnimatedNumber,
+  EmptyState,
+  Panel,
+  SectionLabel,
+  staggerParent,
+} from "../components/primitives";
 
 type PendingPlanChangeRequest = {
   currentPlan: CompanyPlan;
@@ -56,17 +67,18 @@ type ApplyPlanResponse = {
   company: Company;
 };
 
+const planTones: Record<CompanyPlan, "neutral" | "info" | "accent"> = {
+  ESSENTIAL: "neutral",
+  GROWTH: "info",
+  SCALE: "accent",
+};
+
 function getErrorMessage(error: unknown, fallback: string) {
   if (axios.isAxiosError(error)) {
     const message = error.response?.data?.message;
 
-    if (Array.isArray(message)) {
-      return message[0] ?? fallback;
-    }
-
-    if (typeof message === "string") {
-      return message;
-    }
+    if (Array.isArray(message)) return message[0] ?? fallback;
+    if (typeof message === "string") return message;
   }
 
   return fallback;
@@ -83,9 +95,7 @@ function formatCnpj(value: string) {
 }
 
 function formatPhone(value?: string | null) {
-  if (!value) {
-    return "Telefone não informado";
-  }
+  if (!value) return "Telefone não informado";
 
   const digits = value.replace(/\D/g, "").replace(/^55/, "").slice(0, 11);
 
@@ -100,9 +110,7 @@ function formatPhone(value?: string | null) {
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) {
-    return "Sem data";
-  }
+  if (!value) return "Sem data";
 
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "medium",
@@ -110,56 +118,103 @@ function formatDateTime(value?: string | null) {
   }).format(new Date(value));
 }
 
-function formatDate(value?: string | null) {
-  if (!value) {
-    return "Sem data";
-  }
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "medium",
-  }).format(new Date(value));
-}
-
 export default function CompaniesPage() {
   const { user } = useAuth();
+  const isPlatformAdmin = user?.role === "PLATFORM_ADMIN";
+
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
   const [applyingCompanyId, setApplyingCompanyId] = useState<string | null>(
     null,
   );
 
+  const fetchCompanies = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await api.get<Company[]>("/companies", { signal });
+
+      setCompanies(response.data);
+    } catch (error: unknown) {
+      if (axios.isCancel(error)) return;
+
+      toast.error(
+        getErrorMessage(error, "Não foi possível carregar as empresas."),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (user?.role !== "PLATFORM_ADMIN") {
+    if (!isPlatformAdmin) {
       setLoading(false);
       return;
     }
 
-    async function fetchCompanies() {
-      try {
-        const response = await api.get<Company[]>("/companies");
-        setCompanies(response.data);
-      } catch (error: unknown) {
-        toast.error(
-          getErrorMessage(error, "Não foi possível carregar as empresas."),
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
+    const controller = new AbortController();
 
-    void fetchCompanies();
-  }, [user?.role]);
+    void Promise.resolve().then(() => fetchCompanies(controller.signal));
+
+    return () => controller.abort();
+  }, [isPlatformAdmin, fetchCompanies]);
+
+  const pendingCompanies = useMemo(
+    () =>
+      [...companies]
+        .filter((company) => company.pendingPlanChangeRequest)
+        .sort((left, right) => {
+          const leftDate = new Date(
+            left.pendingPlanChangeRequest?.requestedAt ?? left.createdAt,
+          ).getTime();
+          const rightDate = new Date(
+            right.pendingPlanChangeRequest?.requestedAt ?? right.createdAt,
+          ).getTime();
+
+          return rightDate - leftDate;
+        }),
+    [companies],
+  );
+
+  const totals = useMemo(
+    () =>
+      companies.reduce(
+        (acc, company) => {
+          acc.users += company._count.users;
+          acc.students += company._count.students;
+          acc.buses += company._count.buses;
+          acc.devices += company._count.devices;
+          return acc;
+        },
+        { users: 0, students: 0, buses: 0, devices: 0 },
+      ),
+    [companies],
+  );
+
+  const filteredCompanies = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    if (!term) return companies;
+
+    return companies.filter((company) =>
+      `${company.name} ${company.emailDomain} ${company.cnpj}`
+        .toLowerCase()
+        .includes(term),
+    );
+  }, [companies, search]);
 
   async function handleApplyRequestedPlan(companyId: string) {
     try {
       setApplyingCompanyId(companyId);
+
       const response = await api.patch<ApplyPlanResponse>(
         `/companies/${companyId}/apply-requested-plan`,
       );
 
       setCompanies((current) =>
         current.map((company) =>
-          company.id === response.data.company.id ? response.data.company : company,
+          company.id === response.data.company.id
+            ? response.data.company
+            : company,
         ),
       );
 
@@ -176,7 +231,7 @@ export default function CompaniesPage() {
     }
   }
 
-  if (user?.role !== "PLATFORM_ADMIN") {
+  if (!isPlatformAdmin) {
     return (
       <AccessDenied description="Somente o dono da plataforma pode acessar a visão global de empresas e pendências de plano." />
     );
@@ -186,353 +241,287 @@ export default function CompaniesPage() {
     return <CompaniesSkeleton />;
   }
 
-  const pendingCompanies = [...companies]
-    .filter((company) => company.pendingPlanChangeRequest)
-    .sort((left, right) => {
-      const leftDate = new Date(
-        left.pendingPlanChangeRequest?.requestedAt ?? left.createdAt,
-      ).getTime();
-      const rightDate = new Date(
-        right.pendingPlanChangeRequest?.requestedAt ?? right.createdAt,
-      ).getTime();
-
-      return rightDate - leftDate;
-    });
-
-  const totals = companies.reduce(
-    (acc, company) => {
-      acc.users += company._count.users;
-      acc.students += company._count.students;
-      acc.buses += company._count.buses;
-      acc.devices += company._count.devices;
-      return acc;
-    },
-    {
-      users: 0,
-      students: 0,
-      buses: 0,
-      devices: 0,
-    },
-  );
-
   return (
-    <div className="space-y-6">
-      <Card className="rounded-[34px] border border-[#ffd7bf]/70 bg-[radial-gradient(circle_at_top_left,#fff2e8_0%,#ffffff_44%,#f4f7fb_100%)] p-6 shadow-[0_28px_70px_rgba(15,23,42,0.09)] dark:border-[#3a2b22] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,92,0,0.14)_0%,rgba(19,27,40,0.96)_45%,rgba(2,6,23,1)_100%)] md:p-8">
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.2fr)_360px]">
-          <div className="space-y-5">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#ffd8c2] bg-white/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#ff5c00] dark:border-[#5a3b2a] dark:bg-white/8 dark:text-[#ff9b66]">
-              <Building2 className="size-4" />
-              Visão da plataforma
-            </div>
+    <motion.div
+      variants={staggerParent}
+      initial="hidden"
+      animate="show"
+      className="space-y-5"
+    >
+      <PageHeader
+        eyebrow="Plataforma"
+        title="Empresas"
+        description="Carteira de clientes da UniPass, planos ativos e pedidos de troca em aberto."
+        meta={
+          pendingCompanies.length > 0 ? (
+            <StatusBadge tone="warning" dot>
+              {pendingCompanies.length}{" "}
+              {pendingCompanies.length === 1 ? "pendência" : "pendências"}
+            </StatusBadge>
+          ) : (
+            <StatusBadge tone="success" dot>
+              sem pendências
+            </StatusBadge>
+          )
+        }
+      />
 
-            <div className="space-y-3">
-              <h1 className="max-w-3xl text-3xl font-semibold tracking-[-0.05em] text-slate-950 dark:text-white md:text-4xl">
-                Empresas, planos e pendências em um painel pronto para ação.
-              </h1>
-              <p className="max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-                Aqui você acompanha a carteira de empresas da UniPass, enxerga
-                quais planos estão ativos e trata rapidamente as solicitações
-                enviadas pelos administradores.
-              </p>
-            </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard
+          label="Empresas"
+          value={companies.length}
+          icon={<Building2 size={15} />}
+        />
+        <MetricCard
+          label="Pendências"
+          value={pendingCompanies.length}
+          icon={<Clock3 size={15} />}
+        />
+        <MetricCard
+          label="Usuários"
+          value={totals.users}
+          icon={<Users size={15} />}
+        />
+        <MetricCard
+          label="Alunos"
+          value={totals.students}
+          icon={<BookUser size={15} />}
+        />
+        <MetricCard
+          label="UniHubs"
+          value={totals.devices}
+          icon={<Cpu size={15} />}
+        />
+      </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard
-                label="Empresas"
-                value={String(companies.length)}
-                icon={<Building2 className="size-4" />}
-              />
-              <MetricCard
-                label="Pendências"
-                value={String(pendingCompanies.length)}
-                icon={<Clock3 className="size-4" />}
-              />
-              <MetricCard
-                label="Usuários"
-                value={String(totals.users)}
-                icon={<Users className="size-4" />}
-              />
-              <MetricCard
-                label="UniHubs"
-                value={String(totals.devices)}
-                icon={<Cpu className="size-4" />}
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="rounded-[28px] border border-border/70 bg-card/85 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.05]">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Resumo operacional
-              </p>
-              <div className="mt-4 space-y-3">
-                <SummaryRow
-                  icon={<BookUserIcon className="size-4" />}
-                  label="Alunos"
-                  value={String(totals.students)}
-                />
-                <SummaryRow
-                  icon={<Bus className="size-4" />}
-                  label="Ônibus"
-                  value={String(totals.buses)}
-                />
-                <SummaryRow
-                  icon={<Sparkles className="size-4" />}
-                  label="Empresas com pedido"
-                  value={String(pendingCompanies.length)}
-                />
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-[#ffe0ce] bg-[linear-gradient(180deg,#fff7f2_0%,#ffffff_100%)] p-5 shadow-[0_18px_45px_rgba(255,92,0,0.09)] dark:border-[#5a3b2a] dark:bg-[linear-gradient(180deg,rgba(53,34,23,0.9)_0%,rgba(17,24,39,0.7)_100%)]">
-              <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff1e8] text-[#ff5c00] dark:bg-[#352217] dark:text-[#ff9b66]">
-                <CheckCircle2 className="size-5" />
-              </div>
-              <p className="mt-4 text-sm font-semibold text-slate-950 dark:text-white">
-                Fluxo recomendado
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                Quando uma empresa solicitar troca de plano, você já encontra o
-                contato principal e o solicitante na própria pendência. Depois
-                do alinhamento, basta aplicar o plano solicitado.
-              </p>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
+      <section className="space-y-3">
+        <div className="px-1">
+          <h2 className="text-sm font-semibold tracking-tight">
             Solicitações pendentes
           </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            Essas solicitações aparecem assim que o administrador da empresa
-            pede a troca de plano.
+          <p className="text-xs text-muted-foreground">
+            Aparecem assim que o administrador da empresa pede a troca de plano.
           </p>
         </div>
 
         {pendingCompanies.length === 0 ? (
-          <Card className="rounded-[30px] border border-dashed border-slate-300 bg-white/80 p-8 text-center shadow-[0_18px_45px_rgba(15,23,42,0.05)] dark:border-white/15 dark:bg-white/[0.04]">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
-              <Clock3 className="size-6" />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-slate-950 dark:text-white">
-              Nenhuma pendência de plano no momento
-            </h3>
-            <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-              Assim que alguma empresa solicitar uma mudança, o pedido aparece
-              aqui com os contatos certos para você tratar o assunto.
-            </p>
-          </Card>
+          <Panel>
+            <EmptyState
+              icon={<Clock3 size={22} />}
+              title="Nenhuma pendência de plano no momento"
+              description="Quando uma empresa solicitar mudança, o pedido aparece aqui com os contatos para tratar o assunto."
+            />
+          </Panel>
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
             {pendingCompanies.map((company) => {
-              const pendingRequest = company.pendingPlanChangeRequest!;
+              const request = company.pendingPlanChangeRequest!;
 
               return (
-                <Card
+                <Panel
                   key={company.id}
-                  className="rounded-[30px] border border-[#ffd8c2] bg-white/95 p-6 shadow-[0_20px_50px_rgba(255,92,0,0.08)] dark:border-[#5a3b2a] dark:bg-[#111827]/88"
+                  className="p-5"
+                  style={{ borderColor: `${ACCENT}44` }}
                 >
-                  <div className="flex flex-col gap-5">
-                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <div className="inline-flex items-center gap-2 rounded-full bg-[#fff1e8] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#ff5c00] dark:bg-[#352217] dark:text-[#ff9b66]">
-                          <Clock3 className="size-3.5" />
-                          Pendente
-                        </div>
-                        <h3 className="mt-3 text-xl font-semibold text-slate-950 dark:text-white">
-                          {company.name}
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                          @{company.emailDomain} • {formatCnpj(company.cnpj)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/[0.05]">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                          Solicitado em
-                        </p>
-                        <p className="mt-1 font-medium text-slate-950 dark:text-white">
-                          {formatDateTime(pendingRequest.requestedAt)}
-                        </p>
-                      </div>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <StatusBadge tone="warning" dot>
+                        Pendente
+                      </StatusBadge>
+                      <h3 className="mt-2 truncate text-lg font-semibold tracking-tight">
+                        {company.name}
+                      </h3>
+                      <p className="truncate text-xs text-muted-foreground">
+                        @{company.emailDomain} · {formatCnpj(company.cnpj)}
+                      </p>
                     </div>
 
-                    <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.05]">
-                      <div className="flex items-center gap-3">
-                        <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff1e8] text-[#ff5c00] dark:bg-[#352217] dark:text-[#ff9b66]">
-                          <ArrowRightLeft className="size-5" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                            Mudança solicitada
-                          </p>
-                          <p className="mt-1 text-lg font-semibold text-slate-950 dark:text-white">
-                            {companyPlanMeta[pendingRequest.currentPlan].label} para{" "}
-                            {companyPlanMeta[pendingRequest.requestedPlan].label}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <ContactCard
-                        icon={<Users className="size-4" />}
-                        label="Responsável da empresa"
-                        primary={company.contactName || "Responsável não informado"}
-                        secondary={formatPhone(company.contactPhone)}
-                      />
-                      <ContactCard
-                        icon={<Mail className="size-4" />}
-                        label="Quem solicitou"
-                        primary={
-                          pendingRequest.requestedByName || "Administrador da empresa"
-                        }
-                        secondary={
-                          pendingRequest.requestedByEmail || "E-mail não informado"
-                        }
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap gap-3">
-                      {company.contactPhone ? (
-                        <a
-                          href={`tel:${company.contactPhone}`}
-                          className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08]"
-                        >
-                          <Phone className="mr-2 size-4" />
-                          Ligar para responsável
-                        </a>
-                      ) : null}
-
-                      {pendingRequest.requestedByEmail ? (
-                        <a
-                          href={`mailto:${pendingRequest.requestedByEmail}`}
-                          className="inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-100 dark:hover:bg-white/[0.08]"
-                        >
-                          <Mail className="mr-2 size-4" />
-                          Falar com solicitante
-                        </a>
-                      ) : null}
-
-                      <Button
-                        type="button"
-                        onClick={() => void handleApplyRequestedPlan(company.id)}
-                        disabled={applyingCompanyId === company.id}
-                        className="h-11 rounded-2xl bg-[#ff5c00] px-5 text-white hover:bg-[#eb5600]"
-                      >
-                        {applyingCompanyId === company.id
-                          ? "Aplicando..."
-                          : "Aplicar plano solicitado"}
-                      </Button>
+                    <div className="text-right">
+                      <SectionLabel>Solicitado em</SectionLabel>
+                      <p className="mt-0.5 text-xs font-medium">
+                        {formatDateTime(request.requestedAt)}
+                      </p>
                     </div>
                   </div>
-                </Card>
+
+                  <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border/50 bg-background/50 px-3 py-2.5">
+                    <span
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+                      style={{
+                        backgroundColor: `${ACCENT}14`,
+                        color: ACCENT,
+                      }}
+                    >
+                      <ArrowRightLeft size={16} />
+                    </span>
+                    <div className="min-w-0">
+                      <SectionLabel>Mudança solicitada</SectionLabel>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                        {companyPlanMeta[request.currentPlan].label}
+                        <ArrowRightLeft
+                          size={12}
+                          className="text-muted-foreground"
+                        />
+                        {companyPlanMeta[request.requestedPlan].label}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <ContactCard
+                      icon={<Users size={13} />}
+                      label="Responsável da empresa"
+                      primary={
+                        company.contactName || "Responsável não informado"
+                      }
+                      secondary={formatPhone(company.contactPhone)}
+                    />
+                    <ContactCard
+                      icon={<Mail size={13} />}
+                      label="Quem solicitou"
+                      primary={
+                        request.requestedByName || "Administrador da empresa"
+                      }
+                      secondary={
+                        request.requestedByEmail || "E-mail não informado"
+                      }
+                    />
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {company.contactPhone && (
+                      <a
+                        href={`tel:${company.contactPhone}`}
+                        className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl border border-border/60 px-3.5 text-sm transition hover:border-foreground/25 hover:bg-accent/50"
+                      >
+                        <Phone size={14} />
+                        Ligar
+                      </a>
+                    )}
+
+                    {request.requestedByEmail && (
+                      <a
+                        href={`mailto:${request.requestedByEmail}`}
+                        className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-xl border border-border/60 px-3.5 text-sm transition hover:border-foreground/25 hover:bg-accent/50"
+                      >
+                        <Mail size={14} />
+                        Falar com solicitante
+                      </a>
+                    )}
+
+                    <PrimaryButton
+                      onClick={() => void handleApplyRequestedPlan(company.id)}
+                      disabled={applyingCompanyId === company.id}
+                    >
+                      {applyingCompanyId === company.id
+                        ? "Aplicando..."
+                        : "Aplicar plano solicitado"}
+                    </PrimaryButton>
+                  </div>
+                </Panel>
               );
             })}
           </div>
         )}
       </section>
 
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
-            Empresas cadastradas
-          </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            Panorama geral da base ativa da plataforma UniPass.
-          </p>
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">
+              Empresas cadastradas
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Panorama geral da base ativa da plataforma.
+            </p>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {filteredCompanies.length} de {companies.length}
+          </span>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {companies.map((company) => {
-            const planMeta = companyPlanMeta[company.plan];
+        <Toolbar>
+          <SearchField
+            value={search}
+            onChange={setSearch}
+            placeholder="Buscar por nome, domínio ou CNPJ..."
+          />
+        </Toolbar>
 
-            return (
-              <Card
-                key={company.id}
-                className="rounded-[28px] border border-white/70 bg-white/92 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#111827]/82"
-              >
-                <div className="flex h-full flex-col gap-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-lg font-semibold text-slate-950 dark:text-white">
-                        {company.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                        @{company.emailDomain}
-                      </p>
-                    </div>
-
-                    <span
-                      className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${planMeta.badgeClassName}`}
-                    >
-                      {planMeta.label}
-                    </span>
+        {filteredCompanies.length === 0 ? (
+          <Panel>
+            <EmptyState
+              icon={<Building2 size={22} />}
+              title="Nenhuma empresa encontrada"
+              description={`Nada corresponde a "${search}".`}
+            />
+          </Panel>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredCompanies.map((company) => (
+              <Panel key={company.id} className="flex flex-col p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate font-semibold tracking-tight">
+                      {company.name}
+                    </h3>
+                    <p className="truncate text-xs text-muted-foreground">
+                      @{company.emailDomain}
+                    </p>
                   </div>
 
-                  {company.pendingPlanChangeRequest ? (
-                    <div className="rounded-2xl border border-[#ffd8c2] bg-[#fff7f1] px-4 py-3 text-sm text-slate-700 dark:border-[#5a3b2a] dark:bg-[#2a1b15] dark:text-slate-200">
-                      <p className="font-semibold text-slate-950 dark:text-white">
-                        Pendência aberta
-                      </p>
-                      <p className="mt-1 leading-6">
-                        Pedido para{" "}
-                        {
-                          companyPlanMeta[
-                            company.pendingPlanChangeRequest.requestedPlan
-                          ].label
-                        }{" "}
-                        em {formatDateTime(company.pendingPlanChangeRequest.requestedAt)}.
-                      </p>
-                    </div>
-                  ) : null}
-
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <MiniMetric
-                      label="Usuários"
-                      value={String(company._count.users)}
-                    />
-                    <MiniMetric
-                      label="Alunos"
-                      value={String(company._count.students)}
-                    />
-                    <MiniMetric
-                      label="Ônibus"
-                      value={String(company._count.buses)}
-                    />
-                    <MiniMetric
-                      label="UniHubs"
-                      value={String(company._count.devices)}
-                    />
-                  </div>
-
-                  <div className="space-y-3">
-                    <DetailRow
-                      icon={<Users className="size-4" />}
-                      label="Responsável"
-                      value={company.contactName || "Não informado"}
-                    />
-                    <DetailRow
-                      icon={<Phone className="size-4" />}
-                      label="Telefone"
-                      value={formatPhone(company.contactPhone)}
-                    />
-                    <DetailRow
-                      icon={<Clock3 className="size-4" />}
-                      label="Cadastro"
-                      value={formatDate(company.createdAt)}
-                    />
-                  </div>
+                  <StatusBadge tone={planTones[company.plan]}>
+                    {companyPlanMeta[company.plan].label}
+                  </StatusBadge>
                 </div>
-              </Card>
-            );
-          })}
-        </div>
+
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {formatCnpj(company.cnpj)}
+                </p>
+
+                <div className="mt-4 grid grid-cols-4 gap-2 border-t border-border/50 pt-3">
+                  <CountCell
+                    label="Usuários"
+                    value={company._count.users}
+                    icon={<Users size={12} />}
+                  />
+                  <CountCell
+                    label="Alunos"
+                    value={company._count.students}
+                    icon={<BookUser size={12} />}
+                  />
+                  <CountCell
+                    label="Ônibus"
+                    value={company._count.buses}
+                    icon={<Bus size={12} />}
+                  />
+                  <CountCell
+                    label="UniHubs"
+                    value={company._count.devices}
+                    icon={<Cpu size={12} />}
+                  />
+                </div>
+
+                {company.pendingPlanChangeRequest && (
+                  <div className="mt-3">
+                    <StatusBadge tone="warning" dot>
+                      Pedido de troca em aberto
+                    </StatusBadge>
+                  </div>
+                )}
+
+                {company.contactPhone && (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Phone size={12} />
+                    {formatPhone(company.contactPhone)}
+                  </div>
+                )}
+              </Panel>
+            ))}
+          </div>
+        )}
       </section>
-    </div>
+    </motion.div>
   );
 }
 
@@ -542,45 +531,25 @@ function MetricCard({
   icon,
 }: {
   label: string;
-  value: string;
-  icon: ReactNode;
+  value: number;
+  icon: React.ReactNode;
 }) {
   return (
-    <div className="rounded-[26px] border border-border/70 bg-card/80 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.05]">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          {label}
-        </p>
-        <div className="text-[#ff5c00]">{icon}</div>
+    <Panel className="p-4">
+      <div className="flex items-start justify-between gap-2">
+        <SectionLabel>{label}</SectionLabel>
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl"
+          style={{ backgroundColor: `${ACCENT}14`, color: ACCENT }}
+        >
+          {icon}
+        </span>
       </div>
-      <p className="mt-3 text-2xl font-semibold tracking-[-0.05em] text-foreground dark:text-white">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function SummaryRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-border/70 bg-muted/35 px-4 py-3 dark:border-white/10 dark:bg-white/[0.04]">
-      <div className="text-[#ff5c00]">{icon}</div>
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          {label}
-        </p>
-        <p className="text-sm font-medium text-foreground dark:text-white">
-          {value}
-        </p>
-      </div>
-    </div>
+      <AnimatedNumber
+        value={value}
+        className="mt-3 block text-2xl font-semibold leading-none tracking-tight"
+      />
+    </Panel>
   );
 }
 
@@ -590,54 +559,45 @@ function ContactCard({
   primary,
   secondary,
 }: {
-  icon: ReactNode;
+  icon: React.ReactNode;
   label: string;
   primary: string;
   secondary: string;
 }) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 dark:border-white/10 dark:bg-white/[0.05]">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-        <span className="text-[#ff5c00]">{icon}</span>
-        {label}
+    <div className="rounded-2xl border border-border/50 bg-background/50 px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        {icon}
+        <SectionLabel>{label}</SectionLabel>
       </div>
-      <p className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">
+      <p className="mt-1 truncate text-sm font-medium" title={primary}>
         {primary}
       </p>
-      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+      <p className="truncate text-xs text-muted-foreground" title={secondary}>
         {secondary}
       </p>
     </div>
   );
 }
 
-function MiniMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 dark:border-white/10 dark:bg-white/[0.04]">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-        {label}
-      </p>
-      <p className="mt-1 text-lg font-semibold text-slate-950 dark:text-white">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function DetailRow({
-  icon,
+function CountCell({
   label,
   value,
+  icon,
 }: {
-  icon: ReactNode;
   label: string;
-  value: string;
+  value: number;
+  icon: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-300">
-      <div className="text-[#ff5c00]">{icon}</div>
-      <span className="font-medium text-slate-950 dark:text-white">{label}:</span>
-      <span>{value}</span>
+    <div className="text-center">
+      <span className="flex items-center justify-center gap-1 text-muted-foreground">
+        {icon}
+      </span>
+      <p className="mt-1 text-sm font-semibold tabular-nums">{value}</p>
+      <p className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+        {label}
+      </p>
     </div>
   );
 }

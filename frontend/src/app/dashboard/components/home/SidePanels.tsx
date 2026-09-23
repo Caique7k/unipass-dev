@@ -199,7 +199,9 @@ export function BillingPanel({
 }) {
   const cards = [
     {
-      label: "Em aberto",
+      // "A vencer" e não "Em aberto": na tela de boletos, "em aberto" inclui as
+      // vencidas. Aqui as duas linhas são separadas e somam o mesmo total.
+      label: "A vencer",
       count: billing.openCount,
       amount: billing.openAmountCents,
       color: "#0ea5e9",

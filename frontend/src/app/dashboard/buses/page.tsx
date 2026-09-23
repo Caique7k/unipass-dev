@@ -1,30 +1,88 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Plus, Truck, Users } from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { AccessDenied } from "@/components/AccessDenied";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { useBuses } from "./hooks/useBuses";
-import { BusesTable } from "./components/BusesTable";
-import { BusFormModal } from "./components/BusFormModal";
-import { DeleteBusesDialog } from "./components/DeleteDialog";
-import { Bus } from "./types/bus";
-import { PageTableSkeleton } from "../components/DashboardSkeletons";
 import { buildApiUrl } from "@/services/api";
+import { useListQuery } from "../hooks/useListQuery";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { DataTable, type Column } from "../components/DataTable";
+import {
+  ConfirmDialog,
+  ErrorState,
+  GhostButton,
+  PageHeader,
+  PrimaryButton,
+  SearchField,
+  StatusBadge,
+  Toolbar,
+} from "../components/page-kit";
+import { BusFormModal } from "./components/BusFormModal";
+import { Bus } from "./types/bus";
+
+const PAGE_SIZE = 10;
 
 export default function BusesPage() {
   const { user } = useAuth();
   const canView = ["ADMIN", "DRIVER", "COORDINATOR"].includes(user?.role ?? "");
   const canManage = user?.role === "ADMIN";
+
   const [search, setSearch] = useState("");
-  const { buses, loading, page, setPage, lastPage, refetch } = useBuses(search);
-  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const debouncedSearch = useDebouncedValue(search);
+
+  const [formOpen, setFormOpen] = useState(false);
   const [selectedBus, setSelectedBus] = useState<Bus | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
+
+  const { rows, lastPage, total, loading, isFetching, error, refetch } =
+    useListQuery<Bus>(
+      "/buses",
+      { page, limit: PAGE_SIZE, search: debouncedSearch },
+      { enabled: canView },
+    );
+
+  const totalCapacity = useMemo(
+    () => rows.reduce((sum, bus) => sum + (bus.capacity ?? 0), 0),
+    [rows],
+  );
+
+  const columns: Column<Bus>[] = [
+    {
+      key: "plate",
+      header: "Placa",
+      cell: (bus) => (
+        <span className="font-medium tracking-wide">{bus.plate}</span>
+      ),
+    },
+    {
+      key: "capacity",
+      header: "Capacidade",
+      cell: (bus) => (
+        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+          <Users size={13} />
+          <span className="tabular-nums">{bus.capacity}</span>
+          <span className="hidden sm:inline">lugares</span>
+        </span>
+      ),
+    },
+    {
+      key: "createdAt",
+      header: "Cadastrado em",
+      hideBelow: "md",
+      cell: (bus) => (
+        <span className="text-muted-foreground tabular-nums">
+          {bus.createdAt
+            ? new Intl.DateTimeFormat("pt-BR").format(new Date(bus.createdAt))
+            : "—"}
+        </span>
+      ),
+    },
+  ];
 
   if (!canView) {
     return (
@@ -32,17 +90,10 @@ export default function BusesPage() {
     );
   }
 
-  if (loading) {
-    return <PageTableSkeleton showAction={canManage} />;
-  }
-
-  const handleAskDelete = (ids: string[]) => {
-    setSelectedIds(ids);
-    setDeleteOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
+  async function handleConfirmDelete() {
     try {
+      setDeleting(true);
+
       const response = await fetch(buildApiUrl("/buses"), {
         method: "delete",
         headers: { "Content-Type": "application/json" },
@@ -50,93 +101,170 @@ export default function BusesPage() {
         body: JSON.stringify({ ids: selectedIds }),
       });
 
-      if (!response.ok) {
-        throw new Error();
-      }
+      if (!response.ok) throw new Error();
+
+      const removed = selectedIds.length;
 
       setDeleteOpen(false);
       setSelectedIds([]);
 
-      if (page > 1) setPage(1);
+      // Se a página atual pode ter ficado vazia, volta para a primeira.
+      if (page > 1 && removed >= rows.length) {
+        setPage(1);
+      } else {
+        refetch();
+      }
 
       toast.success(
-        selectedIds.length === 1
+        removed === 1
           ? "Ônibus desativado com sucesso."
           : "Ônibus desativados com sucesso.",
       );
-
-      refetch();
     } catch {
       toast.error("Erro ao remover ônibus", {
         description: "Tente novamente mais tarde.",
       });
+    } finally {
+      setDeleting(false);
     }
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Ônibus</h1>
-        <p className="text-sm text-muted-foreground">
-          {canManage
-            ? "Gerencie os ônibus cadastrados"
-            : "Visualize todos os ônibus da operação"}
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Operação"
+        title="Ônibus"
+        description={
+          canManage
+            ? "Gerencie os veículos cadastrados na sua empresa."
+            : "Visualize todos os ônibus da operação."
+        }
+        meta={
+          !loading && total > 0 ? (
+            <StatusBadge tone="accent">
+              {total} {total === 1 ? "veículo" : "veículos"}
+            </StatusBadge>
+          ) : null
+        }
+        actions={
+          canManage ? (
+            <PrimaryButton
+              onClick={() => {
+                setSelectedBus(null);
+                setFormOpen(true);
+              }}
+            >
+              <Plus size={15} />
+              Novo ônibus
+            </PrimaryButton>
+          ) : null
+        }
+      />
 
-      <Card className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
-        <Input
-          placeholder="Buscar pela placa..."
+      <Toolbar>
+        <SearchField
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
+          onChange={(value) => {
+            setSearch(value);
             setPage(1);
           }}
-          className="max-w-sm"
+          placeholder="Buscar pela placa..."
+          busy={isFetching && search !== debouncedSearch}
         />
 
-        {canManage && (
-          <Button
-            onClick={() => {
-              setSelectedBus(null);
-              setOpen(true);
-            }}
-            className="cursor-pointer"
-          >
-            + Novo ônibus
-          </Button>
+        {rows.length > 0 && (
+          <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">
+            {totalCapacity} lugares nesta página
+          </span>
         )}
-      </Card>
+      </Toolbar>
 
-      <Card className="p-4">
-        <BusesTable
-          data={buses}
-          canManage={canManage}
+      {error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          getRowId={(bus) => bus.id}
+          loading={loading}
+          isFetching={isFetching}
           page={page}
-          setPage={setPage}
           lastPage={lastPage}
-          onDelete={handleAskDelete}
-          onEdit={(bus) => {
-            if (!canManage) return;
-            setSelectedBus(bus ?? null);
-            setOpen(true);
-          }}
+          total={total}
+          onPageChange={setPage}
+          selectable={canManage}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          onEditRow={
+            canManage
+              ? (bus) => {
+                  setSelectedBus(bus);
+                  setFormOpen(true);
+                }
+              : undefined
+          }
+          emptyIcon={<Truck size={22} />}
+          emptyTitle={
+            debouncedSearch
+              ? "Nenhum ônibus encontrado"
+              : "Nenhum ônibus cadastrado"
+          }
+          emptyDescription={
+            debouncedSearch
+              ? `Nada corresponde a "${debouncedSearch}".`
+              : canManage
+                ? "Cadastre o primeiro veículo para começar a vincular UniHubs e rotas."
+                : undefined
+          }
+          toolbar={
+            canManage && selectedIds.length > 0 ? (
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-accent/40 px-3 py-2">
+                <span className="text-xs">
+                  <span className="font-semibold tabular-nums">
+                    {selectedIds.length}
+                  </span>{" "}
+                  {selectedIds.length === 1
+                    ? "ônibus selecionado"
+                    : "ônibus selecionados"}
+                </span>
+                <div className="flex items-center gap-2">
+                  <GhostButton onClick={() => setSelectedIds([])}>
+                    Limpar
+                  </GhostButton>
+                  <GhostButton tone="danger" onClick={() => setDeleteOpen(true)}>
+                    Desativar
+                  </GhostButton>
+                </div>
+              </div>
+            ) : null
+          }
         />
-      </Card>
+      )}
 
       {canManage && (
         <>
           <BusFormModal
-            open={open}
-            setOpen={setOpen}
+            open={formOpen}
+            setOpen={setFormOpen}
             bus={selectedBus}
-            onSuccess={() => refetch()}
+            onSuccess={refetch}
           />
-          <DeleteBusesDialog
+
+          <ConfirmDialog
             open={deleteOpen}
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
-            count={selectedIds.length}
+            busy={deleting}
+            title="Desativar ônibus?"
+            confirmLabel="Desativar"
+            description={
+              <>
+                Você está prestes a desativar{" "}
+                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
+                {selectedIds.length === 1 ? "ônibus" : "ônibus"}. Essa ação não
+                pode ser desfeita.
+              </>
+            }
           />
         </>
       )}

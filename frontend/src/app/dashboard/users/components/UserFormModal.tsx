@@ -22,7 +22,7 @@ import {
 import { toast } from "sonner";
 import api from "@/services/api";
 import { roleLabels, type UserRole } from "@/lib/permissions";
-import type { ManagedUser } from "../hooks/useUsers";
+import type { ManagedUser } from "../types/user";
 
 const companyRoles: UserRole[] = ["ADMIN", "DRIVER", "COORDINATOR", "USER"];
 

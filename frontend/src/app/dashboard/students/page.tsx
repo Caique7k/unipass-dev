@@ -1,254 +1,155 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
+import { BookUser, Nfc, Plus } from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { AccessDenied } from "@/components/AccessDenied";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { useStudents } from "../students/hooks/useStudents";
-import { StudentsTable } from "./components/StudentsTable";
-import { StudentModal } from "./components/StudentsFormModal";
-import { DeleteStudentsDialog } from "./components/DeleteDialog";
-import { PageTableSkeleton } from "../components/DashboardSkeletons";
 import { buildApiUrl } from "@/services/api";
-import type { BillingTemplateRecurrence } from "../billing-groups/types/billing-group";
+import { useListQuery } from "../hooks/useListQuery";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { DataTable, type Column } from "../components/DataTable";
+import {
+  ConfirmDialog,
+  ErrorState,
+  FilterChips,
+  GhostButton,
+  PageHeader,
+  PrimaryButton,
+  SearchField,
+  StatusBadge,
+  Toolbar,
+} from "../components/page-kit";
+import { StudentModal } from "./components/StudentsFormModal";
+import { useStudentFormOptions } from "./hooks/useStudentFormOptions";
+import type { Student } from "./types/student";
 
-type Student = {
-  id?: string;
-  name?: string;
-  registration?: string;
-  email?: string | null;
-  phone?: string | null;
-  active?: boolean;
-  groupId?: string | null;
-  billingTemplateId?: string | null;
-  group?: {
-    id: string;
-    name: string;
-    active: boolean;
-  } | null;
-  billingTemplate?: {
-    id: string;
-    name: string;
-    active: boolean;
-    amountCents: number;
-    dueDay: number;
-    recurrence: BillingTemplateRecurrence;
-  } | null;
-  billingCustomer?: {
-    id: string;
-    name: string;
-    email?: string | null;
-    document?: string | null;
-    phone?: string | null;
-  } | null;
-  routes?: {
-    route: {
-      id: string;
-      name: string;
-      active: boolean;
-    };
-  }[];
-};
+type StatusFilter = "Ativos" | "Inativos" | "Todos";
 
-type GroupOption = {
-  id: string;
-  name: string;
-  active: boolean;
-};
-
-type RouteOption = {
-  id: string;
-  name: string;
-  active: boolean;
-};
-
-type BillingTemplateOption = {
-  id: string;
-  name: string;
-  active: boolean;
-  amountCents: number;
-  dueDay: number;
-  recurrence: BillingTemplateRecurrence;
-};
+const PAGE_SIZE = 10;
 
 export default function StudentsPage() {
   const { user } = useAuth();
   const canView = ["ADMIN", "DRIVER", "COORDINATOR"].includes(user?.role ?? "");
   const canManage = user?.role === "ADMIN";
+
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState<"Todos" | "Ativos" | "Inativos">(
-    "Ativos",
-  );
-  const activeFilter = status === "Todos" ? undefined : status === "Ativos";
-  const { data, loading, isFetching, lastPage, refetch } = useStudents(
-    search,
-    page,
-    activeFilter,
-  );
+  const [status, setStatus] = useState<StatusFilter>("Ativos");
+  const debouncedSearch = useDebouncedValue(search);
 
-  const [open, setOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [groupOptions, setGroupOptions] = useState<GroupOption[]>([]);
-  const [groupsLoading, setGroupsLoading] = useState(false);
-  const [groupsLoaded, setGroupsLoaded] = useState(false);
-  const [routeOptions, setRouteOptions] = useState<RouteOption[]>([]);
-  const [routesLoading, setRoutesLoading] = useState(false);
-  const [routesLoaded, setRoutesLoaded] = useState(false);
-  const [billingTemplateOptions, setBillingTemplateOptions] = useState<
-    BillingTemplateOption[]
-  >([]);
-  const [billingTemplatesLoading, setBillingTemplatesLoading] = useState(false);
-  const [billingTemplatesLoaded, setBillingTemplatesLoaded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    if (!canManage || !open) {
-      return;
-    }
+  const activeFilter = status === "Todos" ? undefined : status === "Ativos";
 
-    let isMounted = true;
+  const { rows, lastPage, total, loading, isFetching, error, refetch } =
+    useListQuery<Student>(
+      "/students",
+      {
+        page,
+        limit: PAGE_SIZE,
+        search: debouncedSearch,
+        active: activeFilter,
+      },
+      { enabled: canView },
+    );
 
-    async function loadGroups() {
-      try {
-        setGroupsLoading(true);
-        setGroupsLoaded(false);
+  // As opções do formulário só começam a carregar quando o modal é aberto pela
+  // primeira vez — e ficam em cache depois disso.
+  const options = useStudentFormOptions(canManage && formOpen);
 
-        const params = new URLSearchParams({
-          page: "1",
-          limit: "1000",
-          active: "true",
-        });
+  const columns: Column<Student>[] = [
+    {
+      key: "name",
+      header: "Aluno",
+      cell: (student) => (
+        <div className="min-w-0">
+          <p className="truncate font-medium">{student.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {student.registration}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "group",
+      header: "Grupo",
+      hideBelow: "sm",
+      cell: (student) =>
+        student.group?.name ? (
+          <StatusBadge>{student.group.name}</StatusBadge>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    {
+      key: "routes",
+      header: "Rotas",
+      hideBelow: "lg",
+      cell: (student) => {
+        const names = student.routes?.map(({ route }) => route.name) ?? [];
 
-        const response = await fetch(
-          `${buildApiUrl("/groups")}?${params.toString()}`,
-          {
-            credentials: "include",
-          },
+        if (names.length === 0) {
+          return <span className="text-muted-foreground">—</span>;
+        }
+
+        return (
+          <span
+            title={names.join(", ")}
+            className="line-clamp-1 max-w-[200px] text-muted-foreground"
+          >
+            {names.join(", ")}
+          </span>
         );
+      },
+    },
+    {
+      key: "billing",
+      header: "Grupo de boleto",
+      hideBelow: "xl",
+      cell: (student) =>
+        student.billingTemplate?.name ? (
+          <StatusBadge tone="info">{student.billingTemplate.name}</StatusBadge>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+    {
+      key: "rfid",
+      header: "TAG",
+      hideBelow: "md",
+      cell: (student) => {
+        const tags = student.rfidCards?.map((card) => card.tag) ?? [];
 
-        if (!response.ok) {
-          throw new Error();
+        if (tags.length === 0) {
+          return <span className="text-muted-foreground">—</span>;
         }
 
-        const json = (await response.json()) as { data: GroupOption[] };
-
-        if (!isMounted) {
-          return;
-        }
-
-        setGroupOptions(json.data);
-      } catch {
-        if (isMounted) {
-          toast.error("Erro ao buscar grupos cadastrados.");
-          setGroupOptions([]);
-        }
-      } finally {
-        if (isMounted) {
-          setGroupsLoading(false);
-          setGroupsLoaded(true);
-        }
-      }
-    }
-
-    async function loadRoutes() {
-      try {
-        setRoutesLoading(true);
-        setRoutesLoaded(false);
-
-        const params = new URLSearchParams({
-          page: "1",
-          limit: "1000",
-          active: "true",
-        });
-
-        const response = await fetch(
-          `${buildApiUrl("/routes")}?${params.toString()}`,
-          {
-            credentials: "include",
-          },
+        return (
+          <span
+            title={tags.join(", ")}
+            className="inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground"
+          >
+            <Nfc size={12} />
+            {tags.length === 1 ? tags[0] : `${tags.length} TAGs`}
+          </span>
         );
-
-        if (!response.ok) {
-          throw new Error();
-        }
-
-        const json = (await response.json()) as { data: RouteOption[] };
-
-        if (!isMounted) {
-          return;
-        }
-
-        setRouteOptions(json.data);
-      } catch {
-        if (isMounted) {
-          toast.error("Erro ao buscar rotas cadastradas.");
-          setRouteOptions([]);
-        }
-      } finally {
-        if (isMounted) {
-          setRoutesLoading(false);
-          setRoutesLoaded(true);
-        }
-      }
-    }
-
-    async function loadBillingTemplates() {
-      try {
-        setBillingTemplatesLoading(true);
-        setBillingTemplatesLoaded(false);
-
-        const params = new URLSearchParams({
-          page: "1",
-          limit: "1000",
-          active: "true",
-        });
-
-        const response = await fetch(
-          `${buildApiUrl("/billing/templates")}?${params.toString()}`,
-          {
-            credentials: "include",
-          },
-        );
-
-        if (!response.ok) {
-          throw new Error();
-        }
-
-        const json = (await response.json()) as {
-          data: BillingTemplateOption[];
-        };
-
-        if (!isMounted) {
-          return;
-        }
-
-        setBillingTemplateOptions(json.data);
-      } catch {
-        if (isMounted) {
-          toast.error("Erro ao buscar grupos de boletos cadastrados.");
-          setBillingTemplateOptions([]);
-        }
-      } finally {
-        if (isMounted) {
-          setBillingTemplatesLoading(false);
-          setBillingTemplatesLoaded(true);
-        }
-      }
-    }
-
-    void loadGroups();
-    void loadRoutes();
-    void loadBillingTemplates();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [canManage, open]);
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (student) => (
+        <StatusBadge tone={student.active ? "success" : "danger"} dot>
+          {student.active ? "Ativo" : "Inativo"}
+        </StatusBadge>
+      ),
+    },
+  ];
 
   if (!canView) {
     return (
@@ -256,17 +157,10 @@ export default function StudentsPage() {
     );
   }
 
-  if (loading) {
-    return <PageTableSkeleton showAction={canManage} />;
-  }
-
-  const handleAskDelete = (ids: string[]) => {
-    setSelectedIds(ids);
-    setDeleteOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
+  async function handleConfirmDelete() {
     try {
+      setDeleting(true);
+
       const response = await fetch(buildApiUrl("/students/desactivate"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -274,115 +168,189 @@ export default function StudentsPage() {
         body: JSON.stringify({ ids: selectedIds }),
       });
 
-      if (!response.ok) {
-        throw new Error();
-      }
+      if (!response.ok) throw new Error();
+
+      const removed = selectedIds.length;
 
       setDeleteOpen(false);
       setSelectedIds([]);
 
-      if (page > 1) setPage(1);
+      if (page > 1 && removed >= rows.length) {
+        setPage(1);
+      } else {
+        refetch();
+      }
 
       toast.success(
-        selectedIds.length === 1
+        removed === 1
           ? "Aluno desativado com sucesso."
           : "Alunos desativados com sucesso.",
       );
-
-      refetch();
     } catch {
       toast.error("Erro ao desativar alunos.", {
         description: "Tente novamente em instantes.",
       });
+    } finally {
+      setDeleting(false);
     }
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Alunos</h1>
-        <p className="text-sm text-muted-foreground">
-          {canManage
-            ? "Gerencie os alunos cadastrados no sistema"
-            : "Visualize os alunos, status de embarque e informações da operação"}
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Pessoas"
+        title="Alunos"
+        description={
+          canManage
+            ? "Cadastro central do transporte: grupo, rotas, TAG e cobrança."
+            : "Visualize os alunos e as informações da operação."
+        }
+        meta={
+          !loading && total > 0 ? (
+            <StatusBadge tone="accent">
+              {total} {total === 1 ? "aluno" : "alunos"}
+            </StatusBadge>
+          ) : null
+        }
+        actions={
+          canManage ? (
+            <PrimaryButton
+              onClick={() => {
+                setSelectedStudent(null);
+                setFormOpen(true);
+              }}
+            >
+              <Plus size={15} />
+              Novo aluno
+            </PrimaryButton>
+          ) : null
+        }
+      />
 
-      <Card className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
-        <Input
-          placeholder="Buscar por nome ou matrícula..."
+      <Toolbar>
+        <SearchField
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
+          onChange={(value) => {
+            setSearch(value);
             setPage(1);
           }}
-          className="max-w-sm"
+          placeholder="Buscar por nome ou matrícula..."
+          busy={isFetching && search !== debouncedSearch}
         />
 
-        {canManage && (
-          <Button
-            onClick={() => {
-              setSelectedStudent(null);
-              setOpen(true);
-            }}
-            className="cursor-pointer"
-          >
-            + Novo aluno
-          </Button>
-        )}
-      </Card>
-
-      {isFetching && (
-        <p className="animate-pulse text-xs text-muted-foreground">
-          Atualizando...
-        </p>
-      )}
-
-      <Card className="p-4">
-        <StudentsTable
-          data={data}
-          canManage={canManage}
-          page={page}
-          setPage={setPage}
-          lastPage={lastPage}
-          status={status}
-          setStatus={(value) => {
+        <FilterChips
+          layoutId="students-status"
+          value={status}
+          onChange={(value) => {
             setStatus(value);
             setPage(1);
+            setSelectedIds([]);
           }}
-          onDelete={handleAskDelete}
-          onEdit={(student) => {
-            if (!canManage) return;
-            setSelectedStudent(student ?? null);
-            setOpen(true);
-          }}
+          options={[
+            { value: "Ativos", label: "Ativos" },
+            { value: "Inativos", label: "Inativos" },
+            { value: "Todos", label: "Todos" },
+          ]}
         />
-      </Card>
+      </Toolbar>
+
+      {error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          getRowId={(student) => student.id}
+          loading={loading}
+          isFetching={isFetching}
+          page={page}
+          lastPage={lastPage}
+          total={total}
+          onPageChange={setPage}
+          selectable={canManage}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          isRowSelectable={(student) => student.active}
+          onEditRow={
+            canManage
+              ? (student) => {
+                  setSelectedStudent(student);
+                  setFormOpen(true);
+                }
+              : undefined
+          }
+          emptyIcon={<BookUser size={22} />}
+          emptyTitle={
+            debouncedSearch
+              ? "Nenhum aluno encontrado"
+              : "Nenhum aluno cadastrado"
+          }
+          emptyDescription={
+            debouncedSearch
+              ? `Nada corresponde a "${debouncedSearch}".`
+              : canManage
+                ? "Cadastre o primeiro aluno para vincular TAG, rota e cobrança."
+                : undefined
+          }
+          toolbar={
+            canManage && selectedIds.length > 0 ? (
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-accent/40 px-3 py-2">
+                <span className="text-xs">
+                  <span className="font-semibold tabular-nums">
+                    {selectedIds.length}
+                  </span>{" "}
+                  {selectedIds.length === 1
+                    ? "aluno selecionado"
+                    : "alunos selecionados"}
+                </span>
+                <div className="flex items-center gap-2">
+                  <GhostButton onClick={() => setSelectedIds([])}>
+                    Limpar
+                  </GhostButton>
+                  <GhostButton tone="danger" onClick={() => setDeleteOpen(true)}>
+                    Desativar
+                  </GhostButton>
+                </div>
+              </div>
+            ) : null
+          }
+        />
+      )}
 
       {canManage && (
         <>
-          <DeleteStudentsDialog
+          <StudentModal
+            open={formOpen}
+            onOpenChange={setFormOpen}
+            student={selectedStudent}
+            emailDomain={user?.emailDomain ?? null}
+            groups={options.groups}
+            groupsLoading={options.loading}
+            groupsLoaded={options.loaded}
+            routes={options.routes}
+            routesLoading={options.loading}
+            routesLoaded={options.loaded}
+            billingTemplates={options.billingTemplates}
+            billingTemplatesLoading={options.loading}
+            billingTemplatesLoaded={options.loaded}
+            onSuccess={refetch}
+          />
+
+          <ConfirmDialog
             open={deleteOpen}
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
-            count={selectedIds.length}
-          />
-
-          <StudentModal
-            open={open}
-            onOpenChange={setOpen}
-            student={selectedStudent}
-            emailDomain={user?.emailDomain ?? null}
-            groups={groupOptions}
-            groupsLoading={groupsLoading}
-            groupsLoaded={groupsLoaded}
-            routes={routeOptions}
-            routesLoading={routesLoading}
-            routesLoaded={routesLoaded}
-            billingTemplates={billingTemplateOptions}
-            billingTemplatesLoading={billingTemplatesLoading}
-            billingTemplatesLoaded={billingTemplatesLoaded}
-            onSuccess={() => refetch()}
+            busy={deleting}
+            title="Desativar alunos?"
+            confirmLabel="Desativar"
+            description={
+              <>
+                Você está prestes a desativar{" "}
+                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
+                {selectedIds.length === 1 ? "aluno" : "alunos"}. As TAGs deles
+                deixam de ser aceitas no embarque.
+              </>
+            }
           />
         </>
       )}

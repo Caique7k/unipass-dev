@@ -2,48 +2,110 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { HelpCircle, Plus, SmartphoneNfc } from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { AccessDenied } from "@/components/AccessDenied";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import api from "@/services/api";
-import { useDevices } from "./hooks/useDevices";
-import { DevicesTable } from "./components/DevicesTable";
+import { useListQuery } from "../hooks/useListQuery";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { DataTable, type Column } from "../components/DataTable";
+import {
+  ConfirmDialog,
+  ErrorState,
+  FilterChips,
+  GhostButton,
+  PageHeader,
+  PrimaryButton,
+  SearchField,
+  StatusBadge,
+  Toolbar,
+} from "../components/page-kit";
 import { DeviceModal } from "./components/DeviceFormModal";
-import { DeleteDevicesDialog } from "./components/DeleteDialog";
 import { CreateDeviceModal } from "./components/CreateDeviceModal";
-import { PageTableSkeleton } from "../components/DashboardSkeletons";
+import type { Device } from "./types/device";
 
-type Device = {
-  id?: string;
-  name?: string;
-  busId?: string | null;
-  hardwareId?: string;
-  code?: string | null;
-  secret?: string | null;
-  active?: boolean;
-};
+type StatusFilter = "Ativos" | "Inativos" | "Todos";
+
+const PAGE_SIZE = 10;
 
 export default function DevicesPage() {
   const { user } = useAuth();
   const canManage = user?.role === "ADMIN";
+
   const [search, setSearch] = useState("");
-  const [openCreate, setOpenCreate] = useState(false);
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState<"Todos" | "Ativos" | "Inativos">(
-    "Ativos",
-  );
-  const activeFilter = status === "Todos" ? undefined : status === "Ativos";
-  const { data, loading, isFetching, lastPage, refetch } = useDevices(
-    search,
-    page,
-    activeFilter,
-  );
-  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState<StatusFilter>("Ativos");
+  const debouncedSearch = useDebouncedValue(search);
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [howToOpen, setHowToOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
+
+  const activeFilter = status === "Todos" ? undefined : status === "Ativos";
+
+  const { rows, lastPage, total, loading, isFetching, error, refetch } =
+    useListQuery<Device>(
+      "/devices",
+      {
+        page,
+        limit: PAGE_SIZE,
+        search: debouncedSearch,
+        active: activeFilter,
+      },
+      { enabled: canManage },
+    );
+
+  const columns: Column<Device>[] = [
+    {
+      key: "name",
+      header: "Nome",
+      cell: (device) => (
+        <div className="min-w-0">
+          <p className="truncate font-medium">
+            {device.name || "UniHub sem nome"}
+          </p>
+          <p className="truncate font-mono text-[11px] text-muted-foreground md:hidden">
+            {device.hardwareId}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "hardwareId",
+      header: "Hardware",
+      hideBelow: "md",
+      cell: (device) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {device.hardwareId}
+        </span>
+      ),
+    },
+    {
+      key: "code",
+      header: "Código",
+      hideBelow: "lg",
+      cell: (device) =>
+        device.code ? (
+          <span className="font-mono text-xs text-muted-foreground">
+            {device.code}
+          </span>
+        ) : (
+          <StatusBadge tone="warning">aguardando pareamento</StatusBadge>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (device) => (
+        <StatusBadge tone={device.active ? "success" : "danger"} dot>
+          {device.active ? "Ativo" : "Inativo"}
+        </StatusBadge>
+      ),
+    },
+  ];
 
   if (!canManage) {
     return (
@@ -51,27 +113,17 @@ export default function DevicesPage() {
     );
   }
 
-  if (loading) {
-    return <PageTableSkeleton />;
-  }
-
-  const handleAskDelete = (ids: string[]) => {
-    setSelectedIds(ids);
-    setDeleteOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (selectedIds.length === 0) {
-      return;
-    }
+  async function handleConfirmDelete() {
+    if (selectedIds.length === 0) return;
 
     try {
-      await api.delete("/devices", {
-        data: { ids: selectedIds },
-      });
+      setDeleting(true);
+      await api.delete("/devices", { data: { ids: selectedIds } });
+
+      const removed = selectedIds.length;
 
       toast.success(
-        selectedIds.length === 1
+        removed === 1
           ? "UniHub desativado com sucesso."
           : "UniHubs desativados com sucesso.",
       );
@@ -79,94 +131,158 @@ export default function DevicesPage() {
       setDeleteOpen(false);
       setSelectedIds([]);
 
-      if (page > 1) setPage(1);
-
-      refetch();
-    } catch (error) {
-      console.error("Erro ao desativar dispositivos:", error);
+      if (page > 1 && removed >= rows.length) {
+        setPage(1);
+      } else {
+        refetch();
+      }
+    } catch {
       toast.error("Não foi possível desativar o UniHub.");
+    } finally {
+      setDeleting(false);
     }
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">UniHub</h1>
-        <p className="text-sm text-muted-foreground">
-          Gerencie os dispositivos cadastrados no sistema
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Operação"
+        title="UniHub"
+        description="Pareie e gerencie os dispositivos instalados nos ônibus."
+        meta={
+          !loading && total > 0 ? (
+            <StatusBadge tone="accent">
+              {total} {total === 1 ? "dispositivo" : "dispositivos"}
+            </StatusBadge>
+          ) : null
+        }
+        actions={
+          <>
+            <GhostButton onClick={() => setHowToOpen(true)}>
+              <HelpCircle size={15} />
+              <span className="hidden sm:inline">Como parear</span>
+            </GhostButton>
+            <PrimaryButton
+              onClick={() => {
+                setSelectedDevice(null);
+                setFormOpen(true);
+              }}
+            >
+              <Plus size={15} />
+              Parear dispositivo
+            </PrimaryButton>
+          </>
+        }
+      />
 
-      <Card className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
-        <Input
-          placeholder="Buscar por nome, código ou hardware..."
+      <Toolbar>
+        <SearchField
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
+          onChange={(value) => {
+            setSearch(value);
             setPage(1);
           }}
-          className="max-w-sm"
+          placeholder="Buscar por nome, código ou hardware..."
+          busy={isFetching && search !== debouncedSearch}
         />
 
-        <div className="flex gap-2">
-          <Button
-            onClick={() => {
-              setSelectedDevice(null);
-              setOpen(true);
-            }}
-            className="cursor-pointer"
-          >
-            + Parear dispositivo
-          </Button>
-          <Button
-            onClick={() => setOpenCreate(true)}
-            variant="outline"
-            className="cursor-pointer"
-          >
-            Veja como parear
-          </Button>
-        </div>
-      </Card>
-
-      {isFetching && (
-        <p className="animate-pulse text-xs text-muted-foreground">
-          Atualizando...
-        </p>
-      )}
-
-      <Card className="p-4">
-        <DevicesTable
-          data={data}
-          canManage
-          page={page}
-          setPage={setPage}
-          lastPage={lastPage}
-          status={status}
-          setStatus={(value) => {
+        <FilterChips
+          layoutId="devices-status"
+          value={status}
+          onChange={(value) => {
             setStatus(value);
             setPage(1);
+            setSelectedIds([]);
           }}
-          onDelete={handleAskDelete}
-          onEdit={(device) => {
-            setSelectedDevice(device ?? null);
-            setOpen(true);
-          }}
+          options={[
+            { value: "Ativos", label: "Ativos" },
+            { value: "Inativos", label: "Inativos" },
+            { value: "Todos", label: "Todos" },
+          ]}
         />
-      </Card>
+      </Toolbar>
 
-      <DeleteDevicesDialog
+      {error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          getRowId={(device) => device.id}
+          loading={loading}
+          isFetching={isFetching}
+          page={page}
+          lastPage={lastPage}
+          total={total}
+          onPageChange={setPage}
+          selectable
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          isRowSelectable={(device) => device.active}
+          onEditRow={(device) => {
+            setSelectedDevice(device);
+            setFormOpen(true);
+          }}
+          emptyIcon={<SmartphoneNfc size={22} />}
+          emptyTitle={
+            debouncedSearch
+              ? "Nenhum UniHub encontrado"
+              : "Nenhum UniHub pareado"
+          }
+          emptyDescription={
+            debouncedSearch
+              ? `Nada corresponde a "${debouncedSearch}".`
+              : "Ligue o dispositivo no ônibus e use o código exibido na tela dele para parear."
+          }
+          toolbar={
+            selectedIds.length > 0 ? (
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-accent/40 px-3 py-2">
+                <span className="text-xs">
+                  <span className="font-semibold tabular-nums">
+                    {selectedIds.length}
+                  </span>{" "}
+                  {selectedIds.length === 1
+                    ? "dispositivo selecionado"
+                    : "dispositivos selecionados"}
+                </span>
+                <div className="flex items-center gap-2">
+                  <GhostButton onClick={() => setSelectedIds([])}>
+                    Limpar
+                  </GhostButton>
+                  <GhostButton tone="danger" onClick={() => setDeleteOpen(true)}>
+                    Desativar
+                  </GhostButton>
+                </div>
+              </div>
+            ) : null
+          }
+        />
+      )}
+
+      <DeviceModal
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        device={selectedDevice}
+        onSuccess={refetch}
+      />
+
+      <CreateDeviceModal open={howToOpen} onOpenChange={setHowToOpen} />
+
+      <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         onConfirm={handleConfirmDelete}
-        count={selectedIds.length}
-      />
-      <CreateDeviceModal open={openCreate} onOpenChange={setOpenCreate} />
-
-      <DeviceModal
-        open={open}
-        onOpenChange={setOpen}
-        device={selectedDevice}
-        onSuccess={() => refetch()}
+        busy={deleting}
+        title="Desativar UniHubs?"
+        confirmLabel="Desativar"
+        description={
+          <>
+            Você está prestes a desativar{" "}
+            <strong className="text-foreground">{selectedIds.length}</strong>{" "}
+            {selectedIds.length === 1 ? "dispositivo" : "dispositivos"}. Eles
+            param de registrar embarques e enviar localização.
+          </>
+        }
       />
     </div>
   );

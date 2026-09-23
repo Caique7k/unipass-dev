@@ -1,33 +1,21 @@
-import type { ReactNode } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
-import {
-  Download,
-  ExternalLink,
-  LinkIcon,
-  QrCode,
-  ScanLine,
-  Smartphone,
-} from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Download, ExternalLink, QrCode, ScanLine } from "lucide-react";
+import { PageHeader, StatusBadge } from "../components/page-kit";
+import { Panel, SectionLabel } from "../components/primitives";
 
 const androidUrl = process.env.NEXT_PUBLIC_ANDROID_APP_URL?.trim() ?? "";
 const iosUrl = process.env.NEXT_PUBLIC_IOS_APP_URL?.trim() ?? "";
 
 async function buildQrCode(url: string) {
-  if (!url) {
-    return null;
-  }
+  if (!url) return null;
 
   try {
     return await QRCode.toDataURL(url, {
       width: 256,
       margin: 4,
       errorCorrectionLevel: "H",
-      color: {
-        dark: "#000000",
-        light: "#FFFFFF",
-      },
+      color: { dark: "#000000", light: "#FFFFFF" },
     });
   } catch {
     return null;
@@ -40,9 +28,7 @@ type AppDownload = {
   description: string;
   url: string;
   qrCode: string | null;
-  accentClassName: string;
-  buttonClassName: string;
-  iconShellClassName: string;
+  accent: string;
 };
 
 export default async function AppPage() {
@@ -54,31 +40,21 @@ export default async function AppPage() {
   const downloads: AppDownload[] = [
     {
       title: "Android",
-      subtitle: "APK para instalacao direta",
+      subtitle: "APK para instalação direta",
       description:
-        "Escaneie com a camera do celular para abrir o download do app no Android.",
+        "Escaneie com a câmera do celular para abrir o download do app no Android.",
       url: androidUrl,
       qrCode: androidQrCode,
-      accentClassName:
-        "border-[#d6f5d9] bg-[linear-gradient(180deg,#f4fff5_0%,#ffffff_100%)] dark:border-[#294636] dark:bg-[linear-gradient(180deg,#18241d_0%,#11161a_100%)]",
-      buttonClassName:
-        "bg-[#16a34a] text-white hover:bg-[#15803d] focus-visible:ring-[#16a34a]/30",
-      iconShellClassName:
-        "bg-[#ebfff0] text-[#15803d] ring-[#d6f5d9] dark:bg-[#1d3125] dark:text-[#4ade80] dark:ring-[#294636]",
+      accent: "#16a34a",
     },
     {
       title: "iOS",
-      subtitle: "Link de instalacao para iPhone",
+      subtitle: "Link de instalação para iPhone",
       description:
-        "Escaneie com a camera do iPhone para abrir a pagina de instalacao do app.",
+        "Escaneie com a câmera do iPhone para abrir a página de instalação do app.",
       url: iosUrl,
       qrCode: iosQrCode,
-      accentClassName:
-        "border-[#d9e8ff] bg-[linear-gradient(180deg,#f5f9ff_0%,#ffffff_100%)] dark:border-[#273d63] dark:bg-[linear-gradient(180deg,#141d2c_0%,#11161a_100%)]",
-      buttonClassName:
-        "bg-[#2563eb] text-white hover:bg-[#1d4ed8] focus-visible:ring-[#2563eb]/30",
-      iconShellClassName:
-        "bg-[#edf4ff] text-[#2563eb] ring-[#d9e8ff] dark:bg-[#18253c] dark:text-[#60a5fa] dark:ring-[#273d63]",
+      accent: "#2563eb",
     },
   ];
 
@@ -87,84 +63,58 @@ export default async function AppPage() {
   ).length;
 
   return (
-    <div className="space-y-6">
-      <section className="relative overflow-hidden rounded-[32px] border border-[#ffd9c2] bg-[linear-gradient(135deg,#fff8f3_0%,#ffffff_60%,#fff2e8_100%)] p-6 shadow-[0_24px_60px_rgba(255,92,0,0.08)] dark:border-[#4b2b18] dark:bg-[linear-gradient(135deg,#211714_0%,#16181d_58%,#1d1815_100%)] dark:shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
-        <div className="pointer-events-none absolute inset-y-0 right-0 hidden w-80 bg-[radial-gradient(circle_at_top_right,rgba(255,92,0,0.18),transparent_62%)] dark:bg-[radial-gradient(circle_at_top_right,rgba(255,92,0,0.22),transparent_62%)] lg:block" />
-        <div className="relative space-y-4">
-          <div className="flex size-14 items-center justify-center rounded-[24px] bg-[#ff5c00] text-white shadow-[0_20px_45px_rgba(255,92,0,0.25)]">
-            <Smartphone className="size-7" />
-          </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Aplicativo"
+        title="App do responsável"
+        description="Compartilhe os links oficiais de instalação por QR code. Quem escaneia vai direto para o download."
+        meta={
+          <StatusBadge tone={configuredCount === 2 ? "success" : "warning"}>
+            {configuredCount}/2 links configurados
+          </StatusBadge>
+        }
+      />
 
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#ff5c00]">
-              Aplicativo
-            </p>
-            <h1 className="mt-2 max-w-3xl text-3xl font-semibold tracking-[-0.04em] text-foreground">
-              Compartilhe o app com QR code para Android e iOS
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Esta area centraliza os links oficiais do app para instalacao via
-              celular. Basta escanear o QR code da plataforma desejada e seguir
-              o download.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Highlight
-              icon={<QrCode className="size-4" />}
-              label="QR codes prontos"
-              value={`${configuredCount}/2`}
-            />
-            <Highlight
-              icon={<ScanLine className="size-4" />}
-              label="Acesso rapido"
-              value="Camera do celular"
-            />
-            <Highlight
-              icon={<Download className="size-4" />}
-              label="Download"
-              value="Android e iOS"
-            />
-          </div>
-        </div>
-      </section>
-
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="grid gap-4 lg:grid-cols-2">
           {downloads.map((download) => (
             <DownloadCard key={download.title} download={download} />
           ))}
         </div>
 
         <aside className="space-y-4">
-          <Card className="rounded-[30px] border-white/75 bg-white/82 shadow-[0_20px_55px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#1f2127]">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Como usar</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <InfoRow text="1. Abra a camera do celular ou um leitor de QR code." />
-              <InfoRow text="2. Escaneie o card da plataforma desejada." />
-              <InfoRow text="3. Toque no link aberto para iniciar a instalacao." />
-            </CardContent>
-          </Card>
+          <Panel className="p-5">
+            <SectionLabel>Como usar</SectionLabel>
+            <ol className="mt-3 space-y-2.5">
+              {[
+                "Abra a câmera do celular ou um leitor de QR code.",
+                "Escaneie o card da plataforma desejada.",
+                "Toque no link aberto para iniciar a instalação.",
+              ].map((step, index) => (
+                <li key={step} className="flex gap-2.5 text-sm">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-accent text-[11px] font-semibold tabular-nums">
+                    {index + 1}
+                  </span>
+                  <span className="text-muted-foreground">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </Panel>
 
-          <Card className="rounded-[30px] border-[#ffe1ce] bg-[linear-gradient(180deg,#fff7f2_0%,#ffffff_100%)] shadow-[0_20px_55px_rgba(255,92,0,0.08)] dark:border-[#5b341c] dark:bg-[linear-gradient(180deg,#2c211b_0%,#1f1916_100%)]">
-            <CardContent className="space-y-4 p-5">
-              <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff1e8] text-[#ff5c00] dark:bg-[#3a2618]">
-                <LinkIcon className="size-5" />
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-foreground">
-                  Links configuraveis
-                </p>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Os QR codes desta tela usam as URLs publicas do frontend. Se
-                  algum card ainda não estiver pronto, basta configurar o link
-                  correspondente e atualizar a aplicação.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <Panel className="p-5">
+            <SectionLabel>Links configuráveis</SectionLabel>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Os QR codes usam as variáveis{" "}
+              <code className="rounded bg-accent px-1 py-0.5 font-mono text-[11px]">
+                NEXT_PUBLIC_ANDROID_APP_URL
+              </code>{" "}
+              e{" "}
+              <code className="rounded bg-accent px-1 py-0.5 font-mono text-[11px]">
+                NEXT_PUBLIC_IOS_APP_URL
+              </code>
+              . Configure o link e refaça o build para liberar o card.
+            </p>
+          </Panel>
         </aside>
       </div>
     </div>
@@ -175,109 +125,78 @@ function DownloadCard({ download }: { download: AppDownload }) {
   const isReady = Boolean(download.url && download.qrCode);
 
   return (
-    <Card
-      className={`rounded-[30px] border shadow-[0_20px_55px_rgba(15,23,42,0.06)] dark:shadow-[0_20px_55px_rgba(0,0,0,0.24)] ${download.accentClassName}`}
-    >
-      <CardHeader className="pb-0">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              {download.subtitle}
-            </p>
-            <CardTitle className="mt-2 text-2xl">{download.title}</CardTitle>
-          </div>
-          <div
-            className={`flex size-12 items-center justify-center rounded-2xl shadow-sm ring-1 ${download.iconShellClassName}`}
-          >
-            <QrCode className="size-6" />
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-5">
-        <p className="text-sm leading-6 text-muted-foreground">
-          {download.description}
-        </p>
-
-        <div className="flex justify-center rounded-[28px] border border-black/6 bg-white/92 p-5 backdrop-blur-sm dark:border-white/10 dark:bg-[#f8fafc]">
-          {isReady ? (
-            <div className="rounded-[24px] bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5">
-              <Image
-                src={download.qrCode ?? ""}
-                alt={`QR code para download no ${download.title}`}
-                width={256}
-                height={256}
-                unoptimized
-                className="object-contain"
-                style={{ imageRendering: "pixelated" }}
-              />
-            </div>
-          ) : (
-            <div className="flex size-[220px] flex-col items-center justify-center rounded-[24px] border border-dashed border-[#d7d7d2] bg-[#fafaf7] px-5 text-center dark:border-[#cbd5e1] dark:bg-[#f8fafc]">
-              <QrCode className="size-10 text-muted-foreground" />
-              <p className="mt-4 text-sm font-medium text-foreground">
-                Link ainda não configurado
-              </p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Defina a URL oficial desta plataforma para liberar o QR code.
-              </p>
-            </div>
-          )}
+    <Panel className="flex flex-col p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <SectionLabel>{download.subtitle}</SectionLabel>
+          <h2 className="mt-1 text-xl font-semibold tracking-tight">
+            {download.title}
+          </h2>
         </div>
 
-        <div className="rounded-[24px] border border-black/6 bg-white/85 p-4 dark:border-white/10 dark:bg-[#1a1d23]">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#8b8b85] dark:text-[#9ca3af]">
-            Link atual
-          </p>
-          <p className="mt-2 break-all text-sm font-medium text-foreground">
-            {download.url || "Aguardando configuracao do link"}
-          </p>
-        </div>
+        <span
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl"
+          style={{
+            backgroundColor: `${download.accent}1a`,
+            color: download.accent,
+          }}
+        >
+          {isReady ? <QrCode size={18} /> : <ScanLine size={18} />}
+        </span>
+      </div>
 
+      <p className="mt-2 text-sm text-muted-foreground">
+        {download.description}
+      </p>
+
+      <div className="mt-4 flex justify-center rounded-2xl border border-border/60 bg-white p-4">
         {isReady ? (
-          <a
-            href={download.url}
-            target="_blank"
-            rel="noreferrer"
-            className={`inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl px-5 text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-4 ${download.buttonClassName}`}
-          >
-            Baixar agora
-            <ExternalLink className="size-4" />
-          </a>
+          <Image
+            src={download.qrCode ?? ""}
+            alt={`QR code para download no ${download.title}`}
+            width={208}
+            height={208}
+            unoptimized
+            className="object-contain"
+            style={{ imageRendering: "pixelated" }}
+          />
         ) : (
-          <div className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#ecebe5] px-5 text-sm font-semibold text-[#8b8b85] dark:bg-[#2a2f37] dark:text-[#9ca3af]">
-            Link pendente
+          <div className="flex h-[208px] w-[208px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-5 text-center">
+            <QrCode size={28} className="text-zinc-400" />
+            <p className="text-sm font-medium text-zinc-700">
+              Link ainda não configurado
+            </p>
+            <p className="text-xs text-zinc-500">
+              Defina a URL oficial desta plataforma para liberar o QR code.
+            </p>
           </div>
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Highlight({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-[24px] border border-white/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-white/6">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#8b8b85] dark:text-[#9ca3af]">
-        <span className="text-[#ff5c00]">{icon}</span>
-        {label}
       </div>
-      <p className="mt-2 text-base font-semibold text-foreground">{value}</p>
-    </div>
-  );
-}
 
-function InfoRow({ text }: { text: string }) {
-  return (
-    <div className="rounded-2xl border border-[#f0efe9] bg-[#fafaf7] px-4 py-3 dark:border-white/10 dark:bg-[#17191f]">
-      {text}
-    </div>
+      <div className="mt-4 rounded-2xl border border-border/50 bg-background/50 px-3 py-2.5">
+        <SectionLabel>Link atual</SectionLabel>
+        <p className="mt-1 break-all text-xs font-medium">
+          {download.url || "Aguardando configuração do link"}
+        </p>
+      </div>
+
+      {isReady ? (
+        <a
+          href={download.url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-medium text-white transition hover:brightness-110"
+          style={{ backgroundColor: download.accent }}
+        >
+          Baixar agora
+          <ExternalLink size={14} />
+        </a>
+      ) : (
+        <div className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border text-sm text-muted-foreground">
+          <Download size={14} />
+          Link pendente
+        </div>
+      )}
+    </Panel>
   );
 }

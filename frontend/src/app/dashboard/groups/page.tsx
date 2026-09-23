@@ -2,38 +2,89 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { Layers3, Plus } from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { AccessDenied } from "@/components/AccessDenied";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { buildApiUrl } from "@/services/api";
-import { PageTableSkeleton } from "../components/DashboardSkeletons";
-import { DeleteGroupsDialog } from "./components/DeleteDialog";
+import { useListQuery } from "../hooks/useListQuery";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { DataTable, type Column } from "../components/DataTable";
+import {
+  ConfirmDialog,
+  ErrorState,
+  FilterChips,
+  GhostButton,
+  PageHeader,
+  PrimaryButton,
+  SearchField,
+  StatusBadge,
+  Toolbar,
+} from "../components/page-kit";
 import { GroupFormModal } from "./components/GroupFormModal";
-import { GroupsTable } from "./components/GroupsTable";
-import { useGroups } from "./hooks/useGroups";
 import type { Group } from "./types/group";
+
+type StatusFilter = "Ativos" | "Inativos" | "Todos";
+
+const PAGE_SIZE = 10;
 
 export default function GroupsPage() {
   const { user } = useAuth();
   const canView = ["ADMIN", "DRIVER", "COORDINATOR"].includes(user?.role ?? "");
   const canManage = user?.role === "ADMIN";
+
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState<"Todos" | "Ativos" | "Inativos">(
-    "Ativos",
-  );
-  const activeFilter = status === "Todos" ? undefined : status === "Ativos";
-  const { data, loading, isFetching, lastPage, refetch } = useGroups(
-    search,
-    page,
-    activeFilter,
-  );
-  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState<StatusFilter>("Ativos");
+  const debouncedSearch = useDebouncedValue(search);
+
+  const [formOpen, setFormOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
+
+  const activeFilter = status === "Todos" ? undefined : status === "Ativos";
+
+  const { rows, lastPage, total, loading, isFetching, error, refetch } =
+    useListQuery<Group>(
+      "/groups",
+      {
+        page,
+        limit: PAGE_SIZE,
+        search: debouncedSearch,
+        active: activeFilter,
+      },
+      { enabled: canView },
+    );
+
+  const columns: Column<Group>[] = [
+    {
+      key: "name",
+      header: "Nome",
+      cell: (group) => <span className="font-medium">{group.name}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (group) => (
+        <StatusBadge tone={group.active ? "success" : "danger"} dot>
+          {group.active ? "Ativo" : "Inativo"}
+        </StatusBadge>
+      ),
+    },
+    {
+      key: "createdAt",
+      header: "Criado em",
+      hideBelow: "md",
+      cell: (group) => (
+        <span className="tabular-nums text-muted-foreground">
+          {group.createdAt
+            ? new Intl.DateTimeFormat("pt-BR").format(new Date(group.createdAt))
+            : "—"}
+        </span>
+      ),
+    },
+  ];
 
   if (!canView) {
     return (
@@ -41,17 +92,10 @@ export default function GroupsPage() {
     );
   }
 
-  if (loading) {
-    return <PageTableSkeleton showAction={canManage} />;
-  }
-
-  const handleAskDelete = (ids: string[]) => {
-    setSelectedIds(ids);
-    setDeleteOpen(true);
-  };
-
-  const handleConfirmDelete = async () => {
+  async function handleConfirmDelete() {
     try {
+      setDeleting(true);
+
       const response = await fetch(buildApiUrl("/groups/deactivate"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -59,110 +103,180 @@ export default function GroupsPage() {
         body: JSON.stringify({ ids: selectedIds }),
       });
 
-      if (!response.ok) {
-        throw new Error();
-      }
+      if (!response.ok) throw new Error();
+
+      const removed = selectedIds.length;
 
       setDeleteOpen(false);
       setSelectedIds([]);
 
-      if (page > 1) {
+      if (page > 1 && removed >= rows.length) {
         setPage(1);
+      } else {
+        refetch();
       }
 
       toast.success(
-        selectedIds.length === 1
+        removed === 1
           ? "Grupo desativado com sucesso."
           : "Grupos desativados com sucesso.",
       );
-
-      refetch();
     } catch {
       toast.error("Erro ao desativar grupos.", {
         description: "Tente novamente em instantes.",
       });
+    } finally {
+      setDeleting(false);
     }
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Grupos</h1>
-        <p className="text-sm text-muted-foreground">
-          {canManage
-            ? "Gerencie os grupos que serão usados para separar colaboradores e rotas."
-            : "Visualize os grupos cadastrados para a operação."}
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Pessoas"
+        title="Grupos"
+        description={
+          canManage
+            ? "Organize os alunos em turmas para relatórios e agrupamento visual."
+            : "Visualize os grupos cadastrados para a operação."
+        }
+        meta={
+          !loading && total > 0 ? (
+            <StatusBadge tone="accent">
+              {total} {total === 1 ? "grupo" : "grupos"}
+            </StatusBadge>
+          ) : null
+        }
+        actions={
+          canManage ? (
+            <PrimaryButton
+              onClick={() => {
+                setSelectedGroup(null);
+                setFormOpen(true);
+              }}
+            >
+              <Plus size={15} />
+              Novo grupo
+            </PrimaryButton>
+          ) : null
+        }
+      />
 
-      <Card className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
-        <Input
-          placeholder="Buscar por nome do grupo..."
+      <Toolbar>
+        <SearchField
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
+          onChange={(value) => {
+            setSearch(value);
             setPage(1);
           }}
-          className="max-w-sm"
+          placeholder="Buscar por nome do grupo..."
+          busy={isFetching && search !== debouncedSearch}
         />
 
-        {canManage && (
-          <Button
-            onClick={() => {
-              setSelectedGroup(null);
-              setOpen(true);
-            }}
-            className="cursor-pointer"
-          >
-            + Novo grupo
-          </Button>
-        )}
-      </Card>
-
-      {isFetching && (
-        <p className="animate-pulse text-xs text-muted-foreground">
-          Atualizando...
-        </p>
-      )}
-
-      <Card className="p-4">
-        <GroupsTable
-          data={data}
-          canManage={canManage}
-          page={page}
-          setPage={setPage}
-          lastPage={lastPage}
-          status={status}
-          setStatus={(value) => {
+        <FilterChips
+          layoutId="groups-status"
+          value={status}
+          onChange={(value) => {
             setStatus(value);
             setPage(1);
+            setSelectedIds([]);
           }}
-          onDelete={handleAskDelete}
-          onEdit={(group) => {
-            if (!canManage) {
-              return;
-            }
-
-            setSelectedGroup(group ?? null);
-            setOpen(true);
-          }}
+          options={[
+            { value: "Ativos", label: "Ativos" },
+            { value: "Inativos", label: "Inativos" },
+            { value: "Todos", label: "Todos" },
+          ]}
         />
-      </Card>
+      </Toolbar>
+
+      {error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : (
+        <DataTable
+          rows={rows}
+          columns={columns}
+          getRowId={(group) => group.id}
+          loading={loading}
+          isFetching={isFetching}
+          page={page}
+          lastPage={lastPage}
+          total={total}
+          onPageChange={setPage}
+          selectable={canManage}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          // Um grupo já inativo não pode ser desativado de novo.
+          isRowSelectable={(group) => group.active}
+          onEditRow={
+            canManage
+              ? (group) => {
+                  setSelectedGroup(group);
+                  setFormOpen(true);
+                }
+              : undefined
+          }
+          emptyIcon={<Layers3 size={22} />}
+          emptyTitle={
+            debouncedSearch
+              ? "Nenhum grupo encontrado"
+              : "Nenhum grupo cadastrado"
+          }
+          emptyDescription={
+            debouncedSearch
+              ? `Nada corresponde a "${debouncedSearch}".`
+              : canManage
+                ? "Crie o primeiro grupo para organizar seus alunos."
+                : undefined
+          }
+          toolbar={
+            canManage && selectedIds.length > 0 ? (
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-accent/40 px-3 py-2">
+                <span className="text-xs">
+                  <span className="font-semibold tabular-nums">
+                    {selectedIds.length}
+                  </span>{" "}
+                  {selectedIds.length === 1
+                    ? "grupo selecionado"
+                    : "grupos selecionados"}
+                </span>
+                <div className="flex items-center gap-2">
+                  <GhostButton onClick={() => setSelectedIds([])}>
+                    Limpar
+                  </GhostButton>
+                  <GhostButton tone="danger" onClick={() => setDeleteOpen(true)}>
+                    Desativar
+                  </GhostButton>
+                </div>
+              </div>
+            ) : null
+          }
+        />
+      )}
 
       {canManage && (
         <>
-          <DeleteGroupsDialog
+          <GroupFormModal
+            open={formOpen}
+            onOpenChange={setFormOpen}
+            group={selectedGroup}
+            onSuccess={refetch}
+          />
+
+          <ConfirmDialog
             open={deleteOpen}
             onOpenChange={setDeleteOpen}
             onConfirm={handleConfirmDelete}
-            count={selectedIds.length}
-          />
-
-          <GroupFormModal
-            open={open}
-            onOpenChange={setOpen}
-            group={selectedGroup}
-            onSuccess={() => refetch()}
+            busy={deleting}
+            title="Desativar grupos?"
+            confirmLabel="Desativar"
+            description={
+              <>
+                Você está prestes a desativar{" "}
+                <strong className="text-foreground">{selectedIds.length}</strong>{" "}
+                {selectedIds.length === 1 ? "grupo" : "grupos"}. Os alunos
+                vinculados continuam cadastrados.
+              </>
+            }
           />
         </>
       )}

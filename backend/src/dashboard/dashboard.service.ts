@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { EventType, Prisma, ScheduleType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  CLOSED_CHARGE_STATUSES,
+  buildOverdueChargeWhere,
+} from '../billing/billing-charge-status.util';
+import {
   addDaysToDateKey,
   getAppTimeZone,
   getZonedDateParts,
@@ -616,24 +620,22 @@ export class DashboardService {
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
     );
 
+    // As regras vêm do módulo financeiro para que o painel e a tela de boletos
+    // nunca mostrem contagens diferentes da mesma coisa.
+    const overdueWhere = buildOverdueChargeWhere(now);
+
     const [openCharges, overdueCharges, paidCharges] = await Promise.all([
       this.prisma.billingCharge.aggregate({
         where: {
           companyId,
-          status: { in: ['ISSUED', 'SENT'] },
-          dueDate: { gte: now },
+          status: { notIn: [...CLOSED_CHARGE_STATUSES] },
+          NOT: overdueWhere,
         },
         _count: { _all: true },
         _sum: { amountCents: true },
       }),
       this.prisma.billingCharge.aggregate({
-        where: {
-          companyId,
-          OR: [
-            { status: 'OVERDUE' },
-            { status: { in: ['ISSUED', 'SENT'] }, dueDate: { lt: now } },
-          ],
-        },
+        where: { companyId, ...overdueWhere },
         _count: { _all: true },
         _sum: { amountCents: true },
       }),

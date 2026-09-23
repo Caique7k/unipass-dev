@@ -26,6 +26,10 @@ import type {
 } from "@/app/dashboard/billing-groups/types/billing-group";
 import { billingRecurrenceLabels } from "@/app/dashboard/billing-groups/types/billing-group";
 import { AccessDenied } from "@/components/AccessDenied";
+import {
+  GhostButton,
+  PageHeader,
+} from "@/app/dashboard/components/page-kit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -828,29 +832,25 @@ export default function BillingPage() {
       : selectedChargeTemplate?.name ?? "Grupo nao encontrado";
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight">Boletos</h1>
-          <p className="max-w-3xl text-sm text-muted-foreground">
-            {!showGatewayTabs
-              ? "Enquanto a empresa nao usa o gateway da plataforma, esta area fica focada em explicacao e preparo do onboarding."
-              : "A operacao financeira agora esta separada por etapas para ficar mais clara: cadastro da empresa, emissao em lote e acompanhamento dos boletos."}
-          </p>
-        </div>
-
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => void handleRefreshAll()}
-          className="rounded-2xl"
-        >
-          <RefreshCw
-            className={cn("mr-2 size-4", chargesFetching && "animate-spin")}
-          />
-          Atualizar
-        </Button>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Financeiro"
+        title="Boletos"
+        description={
+          !showGatewayTabs
+            ? "Enquanto a empresa não usa o gateway da plataforma, esta área fica focada na explicação e no preparo do onboarding."
+            : "A operação financeira é separada por etapas: cadastro da empresa, emissão em lote e acompanhamento dos boletos."
+        }
+        actions={
+          <GhostButton onClick={() => void handleRefreshAll()}>
+            <RefreshCw
+              size={13}
+              className={cn(chargesFetching && "animate-spin")}
+            />
+            Atualizar
+          </GhostButton>
+        }
+      />
 
       <ModeBanner
         overview={overview}
@@ -860,7 +860,7 @@ export default function BillingPage() {
 
       {!showGatewayTabs ? (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_360px]">
-          <Card className="rounded-[28px] border border-border/60">
+          <Card className="rounded-3xl border border-border/60">
             <CardHeader className="space-y-3">
               <div className="flex items-center gap-3">
                 <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff2ea] text-[#ff5c00] dark:bg-[#2d211a]">
@@ -880,7 +880,7 @@ export default function BillingPage() {
               {overview.tutorial.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-[22px] border border-border/60 bg-card/60 p-4"
+                  className="rounded-2xl border border-border/60 bg-card/60 p-4"
                 >
                   <p className="font-medium">{item.title}</p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -891,7 +891,7 @@ export default function BillingPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-[28px] border border-border/60">
+          <Card className="rounded-3xl border border-border/60">
             <CardHeader className="space-y-3">
               <div className="flex items-center gap-3">
                 <div className="flex size-11 items-center justify-center rounded-2xl bg-[#eef6ff] text-sky-700 dark:bg-[#132533] dark:text-sky-300">
@@ -936,7 +936,7 @@ export default function BillingPage() {
                   Quero usar o gateway da plataforma
                 </Button>
               ) : (
-                <div className="rounded-[22px] border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
+                <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
                   Aguarde a empresa concluir o onboarding financeiro para liberar a
                   visao operacional desta area.
                 </div>
@@ -947,7 +947,7 @@ export default function BillingPage() {
       ) : (
         <>
           {availableTabs.length > 1 && (
-            <div className="rounded-[24px] border border-border/60 bg-background/70 p-2">
+            <div className="rounded-2xl border border-border/60 bg-background/70 p-2">
               <div className="flex flex-wrap gap-2">
                 {availableTabs.map((tab) => (
                   <TabButton
@@ -964,7 +964,7 @@ export default function BillingPage() {
 
           {activeTab === "company" && canManageGateway && (
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_340px]">
-              <Card className="rounded-[28px] border border-border/60">
+              <Card className="rounded-3xl border border-border/60">
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <CardTitle>Cadastro da empresa</CardTitle>
@@ -990,7 +990,7 @@ export default function BillingPage() {
                 <CardContent className="space-y-6">
                   {isEditingSettings ? (
                     <>
-                      <div className="rounded-[24px] border border-border/60 bg-card/60 p-4">
+                      <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
                         <label className="flex items-start gap-3">
                           <Checkbox
                             checked={form.usePlatformGateway}
@@ -1131,7 +1131,7 @@ export default function BillingPage() {
                           </label>
                         </div>
                       ) : (
-                        <div className="rounded-[24px] border border-dashed border-border/70 bg-muted/20 p-5 text-sm text-muted-foreground">
+                        <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-5 text-sm text-muted-foreground">
                           Se o gateway permanecer desligado, a tela volta para o
                           modo explicativo.
                         </div>
@@ -1247,7 +1247,7 @@ export default function BillingPage() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-[28px] border border-border/60">
+              <Card className="rounded-3xl border border-border/60">
                 <CardHeader className="space-y-3">
                   <div className="flex items-center gap-3">
                     <div className="flex size-11 items-center justify-center rounded-2xl bg-[#eef6ff] text-sky-700 dark:bg-[#132533] dark:text-sky-300">
@@ -1293,7 +1293,7 @@ export default function BillingPage() {
           )}
 
           {activeTab === "issue" && canIssueCharges && (
-            <Card className="rounded-[28px] border border-border/60">
+            <Card className="rounded-3xl border border-border/60">
               <CardHeader className="space-y-3">
                 <div className="flex items-center gap-3">
                   <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff2ea] text-[#ff5c00] dark:bg-[#2d211a]">
@@ -1311,7 +1311,7 @@ export default function BillingPage() {
 
               <CardContent className="space-y-5">
                 {templateOptions.length === 0 && !templatesLoading ? (
-                  <div className="rounded-[24px] border border-dashed border-border/70 bg-muted/20 p-5 text-sm text-muted-foreground">
+                  <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-5 text-sm text-muted-foreground">
                     Cadastre grupos de boletos e vincule-os aos alunos para
                     liberar a emissao em lote.
                   </div>
@@ -1380,7 +1380,7 @@ export default function BillingPage() {
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(260px,0.8fr)]">
-                      <div className="rounded-[24px] border border-border/60 bg-card/60 p-4">
+                      <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
                         <p className="text-sm font-medium">Resumo da emissao</p>
                         <div className="mt-3 grid gap-3 md:grid-cols-2">
                           <StaticField
@@ -1402,7 +1402,7 @@ export default function BillingPage() {
                         </div>
                       </div>
 
-                      <div className="rounded-[24px] border border-border/60 bg-background/70 p-4">
+                      <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
                         <p className="text-sm font-medium">Regra aplicada</p>
                         <p className="mt-3 text-sm text-muted-foreground">
                           {selectedTemplate
@@ -1444,7 +1444,7 @@ export default function BillingPage() {
                 {overview.summaryCards.map((card) => (
                   <Card
                     key={card.id}
-                    className="rounded-[24px] border border-border/60"
+                    className="rounded-2xl border border-border/60"
                   >
                     <CardContent className="space-y-3 p-5">
                       <p className="text-sm text-muted-foreground">
@@ -1461,7 +1461,7 @@ export default function BillingPage() {
                 ))}
               </div>
 
-              <Card className="rounded-[28px] border border-border/60">
+              <Card className="rounded-3xl border border-border/60">
                 <CardHeader className="space-y-4">
                   <div>
                     <CardTitle>
@@ -1591,21 +1591,21 @@ export default function BillingPage() {
 
                 <CardContent className="space-y-4">
                   {chargeError ? (
-                    <div className="rounded-[24px] border border-dashed border-rose-300 bg-rose-50/80 p-5 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200">
+                    <div className="rounded-2xl border border-dashed border-rose-300 bg-rose-50/80 p-5 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-200">
                       {chargeError}
                     </div>
                   ) : chargesLoading ? (
-                    <div className="rounded-[24px] border border-dashed border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
+                    <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
                       Carregando boletos...
                     </div>
                   ) : charges.length === 0 ? (
-                    <div className="rounded-[24px] border border-dashed border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
+                    <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-6 text-sm text-muted-foreground">
                       Nenhum boleto encontrado com os filtros atuais. Ajuste o
                       mes, o grupo ou o status.
                     </div>
                   ) : (
                     <>
-                      <div className="overflow-hidden rounded-[24px] border border-border/60">
+                      <div className="overflow-hidden rounded-2xl border border-border/60">
                         <Table>
                           <TableHeader>
                             <TableRow>

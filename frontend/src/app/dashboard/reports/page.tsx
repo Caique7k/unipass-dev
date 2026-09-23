@@ -31,6 +31,7 @@ import {
 import { useAuth } from "@/app/contexts/AuthContext";
 import { PageTableSkeleton } from "@/app/dashboard/components/DashboardSkeletons";
 import { AccessDenied } from "@/components/AccessDenied";
+import { PageHeader, StatusBadge } from "@/app/dashboard/components/page-kit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -745,34 +746,19 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-[32px] border border-[#ffd8c3] bg-[linear-gradient(135deg,#fff6ef_0%,#ffffff_55%,#fff1e7_100%)] p-6 shadow-[0_24px_60px_rgba(255,92,0,0.08)] dark:border-[#4f3124] dark:bg-[linear-gradient(135deg,#211915_0%,#181818_55%,#1f1713_100%)] dark:shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00] dark:text-[#ffb07a]">
-              Administração
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-              Relatórios operacionais e gerenciais
-            </h1>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              Relatórios de operação, alunos, rotas, grupos e frota com filtros
-              por período e exportação em PDF do resultado atual.
-            </p>
-          </div>
-
-          <div className="rounded-[24px] border border-white/80 bg-white/85 px-5 py-4 shadow-sm dark:border-white/10 dark:bg-[#222222]/85">
-            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-              Última geração
-            </p>
-            <p className="mt-2 text-sm font-medium text-foreground">
-              {formatGeneratedAt(data?.generatedAt)}
-            </p>
-          </div>
-        </div>
-      </section>
+      <PageHeader
+        eyebrow="Administração"
+        title="Relatórios"
+        description="Operação, alunos, rotas, grupos e frota com filtros por período e exportação em PDF."
+        meta={
+          data?.generatedAt ? (
+            <StatusBadge>Gerado {formatGeneratedAt(data.generatedAt)}</StatusBadge>
+          ) : null
+        }
+      />
 
       <section className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <Card className="rounded-[30px] border-white/75 bg-white/88 shadow-[0_20px_55px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#1f2127] dark:shadow-[0_20px_55px_rgba(0,0,0,0.24)]">
+        <Card className="rounded-3xl border border-border/60 bg-card/70 backdrop-blur-xl">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-3 text-xl">
               <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff1e8] text-[#ff5c00] dark:bg-[#3a2618] dark:text-[#ffb07a]">
@@ -854,7 +840,7 @@ export default function ReportsPage() {
                   })}
 
                   {groupedCatalog[category].length === 0 && (
-                    <div className="rounded-[20px] border border-dashed border-border/70 px-4 py-5 text-sm text-muted-foreground">
+                    <div className="rounded-2xl border border-dashed border-border/70 px-4 py-5 text-sm text-muted-foreground">
                       Nenhum relatório encontrado nessa categoria.
                     </div>
                   )}
@@ -933,7 +919,7 @@ export default function ReportsPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-[30px] border-white/75 bg-white/88 shadow-[0_20px_55px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#1f2127] dark:shadow-[0_20px_55px_rgba(0,0,0,0.24)]">
+          <Card className="rounded-3xl border border-border/60 bg-card/70 backdrop-blur-xl">
             <CardHeader className="pb-1">
               <CardTitle className="flex items-center gap-3 text-xl">
                 <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff1e8] text-[#ff5c00] dark:bg-[#3a2618] dark:text-[#ffb07a]">
@@ -1178,7 +1164,7 @@ export default function ReportsPage() {
             {report.summaryCards.map((item) => (
               <Card
                 key={item.label}
-                className="rounded-[26px] border-white/75 bg-white/88 shadow-[0_18px_45px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#1f2127] dark:shadow-[0_18px_45px_rgba(0,0,0,0.24)]"
+                className="rounded-3xl border border-border/60 bg-card/70 backdrop-blur-xl"
               >
                 <CardContent className="pt-0">
                   <p className="text-sm text-muted-foreground">{item.label}</p>
@@ -1193,7 +1179,7 @@ export default function ReportsPage() {
             ))}
           </section>
 
-          <Card className="rounded-[30px] border-white/75 bg-white/85 shadow-[0_20px_55px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#1f2127] dark:shadow-[0_20px_55px_rgba(0,0,0,0.24)]">
+          <Card className="rounded-3xl border border-border/60 bg-card/70 backdrop-blur-xl">
             <CardHeader className="pb-2">
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#ff5c00] dark:text-[#ffb07a]">
@@ -1206,7 +1192,7 @@ export default function ReportsPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-[28px] border border-[#f1ede8] bg-[#fcfbf9] p-4 dark:border-white/10 dark:bg-[#17191f]">
+              <div className="rounded-2xl border border-border/50 bg-background/50 p-4">
                 <div className="flex flex-col gap-1 pb-4">
                   <p className="text-base font-semibold text-foreground">
                     {report.chart.title}
@@ -1257,7 +1243,7 @@ export default function ReportsPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-[30px] border-white/75 bg-white/85 shadow-[0_20px_55px_rgba(15,23,42,0.06)] dark:border-white/10 dark:bg-[#1f2127] dark:shadow-[0_20px_55px_rgba(0,0,0,0.24)]">
+          <Card className="rounded-3xl border border-border/60 bg-card/70 backdrop-blur-xl">
             <CardHeader className="pb-2">
               <CardTitle className="text-xl">{report.table.title}</CardTitle>
               <p className="text-sm leading-6 text-muted-foreground">
@@ -1298,7 +1284,7 @@ export default function ReportsPage() {
                   </div>
                 </div>
               ) : (
-                <div className="rounded-[24px] border border-dashed border-border/70 bg-background/60 px-4 py-10 text-center">
+                <div className="rounded-2xl border border-dashed border-border/70 bg-background/60 px-4 py-10 text-center">
                   <p className="text-base font-semibold">{report.table.emptyTitle}</p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {report.table.emptyDescription}
