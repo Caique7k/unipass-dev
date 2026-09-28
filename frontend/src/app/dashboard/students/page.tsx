@@ -131,7 +131,11 @@ export default function StudentsPage() {
       header: "TAG",
       hideBelow: "md",
       cell: (student) => {
-        const tags = student.rfidCards?.map((card) => card.tag) ?? [];
+        // TAG liberada (aluno desativado) não conta: pode já estar com outro aluno.
+        const tags =
+          student.rfidCards
+            ?.filter((card) => card.active !== false)
+            .map((card) => card.tag) ?? [];
 
         if (tags.length === 0) {
           return <span className="text-muted-foreground">—</span>;
@@ -357,7 +361,7 @@ export default function StudentsPage() {
             }
             description="O aluno sai das listagens e dos relatórios da operação."
             items={selectedNames}
-            consequence="A TAG dele deixa de ser aceita no embarque: a próxima leitura vira um evento negado."
+            consequence="A TAG dele é liberada: deixa de ser aceita no embarque e pode ser vinculada a outro aluno. Se ele for reativado, será preciso vincular uma TAG de novo."
           />
         </>
       )}

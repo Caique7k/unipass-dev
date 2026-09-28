@@ -29,6 +29,22 @@ function generatePairingCode() {
   return randomBytes(3).toString('hex').toUpperCase();
 }
 
+// Estado "de fábrica": só o hardwareId continua identificando o aparelho.
+const RELEASED_DEVICE_DATA = {
+  companyId: null,
+  busId: null,
+  code: null,
+  secret: null,
+  name: null,
+  pairedAt: null,
+  pairingCode: null,
+  pairingCodeExpiresAt: null,
+  lastLat: null,
+  lastLng: null,
+  lastUpdate: null,
+  active: true,
+} satisfies Prisma.DeviceUncheckedUpdateManyInput;
+
 const deviceSafeSelect = {
   id: true,
   code: true,
@@ -339,22 +355,44 @@ export class DevicesService {
     };
   }
 
+  /**
+   * "Excluir" um UniHub = liberar o aparelho físico: sai do ônibus e da
+   * empresa e perde code/secret. O firmware recebe 404 na próxima chamada,
+   * volta sozinho ao pareamento e pode ser pareado de novo (nesta ou em outra
+   * empresa). A linha do Device fica, porque TransportEvent aponta para ela e
+   * carrega o próprio companyId — o histórico da empresa não se perde.
+   *
+   * Antes isto só marcava active=false, deixando o aparelho preso à empresa e
+   * ao ônibus e recusado até no pareamento, sem caminho de volta.
+   */
   async deleteMany(user, dto: DeleteDevicesDto) {
-    const result = await this.prisma.device.updateMany({
+    const now = new Date();
+    const devices = await this.prisma.device.findMany({
       where: {
         id: { in: dto.ids },
         companyId: user.companyId,
       },
-      data: {
-        active: false,
-      },
+      select: { id: true },
     });
 
-    if (result.count === 0) {
+    if (devices.length === 0) {
       throw new NotFoundException(
-        'Nenhum dispositivo encontrado para desativar.',
+        'Nenhum dispositivo encontrado para remover.',
       );
     }
+
+    const ids = devices.map((device) => device.id);
+
+    const [, result] = await this.prisma.$transaction([
+      this.prisma.rfidCaptureSession.updateMany({
+        where: { deviceId: { in: ids }, tag: null, cancelledAt: null },
+        data: { cancelledAt: now },
+      }),
+      this.prisma.device.updateMany({
+        where: { id: { in: ids } },
+        data: RELEASED_DEVICE_DATA,
+      }),
+    ]);
 
     return result;
   }

@@ -40,5 +40,6 @@ export type Student = {
   }[];
   rfidCards?: {
     tag: string;
+    active?: boolean;
   }[];
 };

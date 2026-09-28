@@ -8,6 +8,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { StudentBillingCustomerDto } from './dto/student-billing-customer.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
+import { requireRfidTag } from '../rfid/rfid-tag.util';
+import {
+  assignRfidTagToStudent,
+  releaseStudentsRfidCards,
+} from '../rfid/rfid-card.assign';
 
 const studentDetailsInclude = {
   rfidCards: true,
@@ -161,6 +166,8 @@ export class StudentsService {
       company.emailDomain,
     );
 
+    const rfidTag = dto.rfidTag ? requireRfidTag(dto.rfidTag) : null;
+
     return this.prisma.$transaction(async (tx) => {
       const exists = await tx.student.findFirst({
         where: {
@@ -171,16 +178,6 @@ export class StudentsService {
 
       if (exists) {
         throw new BadRequestException('Matricula ja cadastrada');
-      }
-
-      if (dto.rfidTag) {
-        const existingTag = await tx.rfidCard.findUnique({
-          where: { tag: dto.rfidTag },
-        });
-
-        if (existingTag) {
-          throw new BadRequestException('RFID ja cadastrado');
-        }
       }
 
       let student;
@@ -218,13 +215,11 @@ export class StudentsService {
         throw error;
       }
 
-      if (dto.rfidTag) {
-        await tx.rfidCard.create({
-          data: {
-            tag: dto.rfidTag,
-            studentId: student.id,
-            companyId,
-          },
+      if (rfidTag) {
+        await assignRfidTagToStudent(tx, {
+          companyId,
+          studentId: student.id,
+          tag: rfidTag,
         });
       }
 
@@ -272,6 +267,7 @@ export class StudentsService {
         ? this.normalizeStudentEmail(dto.email, company.emailDomain)
         : student.email;
     const nextName = dto.name ?? student.name;
+    const nextActive = dto.active ?? student.active;
     const nextPhone = dto.phone ?? student.phone;
 
     try {
@@ -281,13 +277,17 @@ export class StudentsService {
           data: {
             name: nextName,
             registration: dto.registration ?? student.registration,
-            active: dto.active ?? student.active,
+            active: nextActive,
             groupId: nextGroupId,
             billingTemplateId: nextBillingTemplateId,
             email: nextEmail,
             phone: nextPhone,
           },
         });
+
+        if (student.active && !nextActive) {
+          await releaseStudentsRfidCards(tx, companyId, [id]);
+        }
 
         await tx.studentRoute.deleteMany({
           where: {
@@ -341,17 +341,25 @@ export class StudentsService {
     });
   }
 
+  // Desativar o aluno libera a TAG dele para ser vinculada a outro aluno.
+  // Reativar o aluno NÃO devolve a TAG (ela pode já estar com outra pessoa).
   async desactivateMany(companyId: string, ids: string[]) {
-    const result = await this.prisma.student.updateMany({
-      where: {
-        companyId,
-        id: {
-          in: ids,
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.student.updateMany({
+        where: {
+          companyId,
+          id: {
+            in: ids,
+          },
         },
-      },
-      data: {
-        active: false,
-      },
+        data: {
+          active: false,
+        },
+      });
+
+      await releaseStudentsRfidCards(tx, companyId, ids);
+
+      return updated;
     });
 
     if (result.count === 0) {

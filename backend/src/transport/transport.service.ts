@@ -14,6 +14,15 @@ import {
 import { safeCompareStrings } from 'src/security/secure-compare.util';
 import { BoardingDto } from './dto/boarding.dto';
 import { IotBoardingDto } from './dto/iot-boarding.dto';
+import { normalizeRfidTag, requireRfidTag } from 'src/rfid/rfid-tag.util';
+import {
+  TransportDeniedException,
+  TransportStateException,
+} from './transport.errors';
+
+// Mesma TAG no mesmo UniHub dentro desta janela é tratada como leitura repetida
+// (aluno segurando o cartão no leitor), e não como embarque seguido de desembarque.
+const IOT_REPEAT_WINDOW_MS = 5_000;
 
 @Injectable()
 export class TransportService {
@@ -128,12 +137,19 @@ export class TransportService {
     });
   }
 
-  private async processBoarding(device: any, rfidTag: string) {
-    const card = await this.getCardWithStudent(rfidTag, device.companyId);
+  /**
+   * Resolve TAG -> aluno e aplica as regras de acesso comuns a embarque e
+   * desembarque. Toda recusa vira um TransportEvent DENIED (auditoria).
+   */
+  private async resolveStudentCard(device: any, rawTag: string) {
+    const tag = normalizeRfidTag(rawTag);
+    const card = tag
+      ? await this.getCardWithStudent(tag, device.companyId)
+      : null;
 
     if (!card || !card.student) {
       await this.logDenied(device, card);
-      throw new ForbiddenException('TAG não autorizada.');
+      throw new TransportDeniedException('TAG não autorizada.', 'UNKNOWN_TAG');
     }
 
     const student = card.student;
@@ -143,31 +159,45 @@ export class TransportService {
       student.companyId !== device.companyId
     ) {
       await this.logDenied(device, card, student.id);
-      throw new ForbiddenException(
+      throw new TransportDeniedException(
         'A TAG não pertence à mesma empresa do dispositivo.',
+        'OTHER_COMPANY',
       );
+    }
+
+    if (!card.active) {
+      await this.logDenied(device, card, student.id);
+      throw new TransportDeniedException('TAG desativada.', 'INACTIVE_TAG');
     }
 
     if (!student.active) {
       await this.logDenied(device, card, student.id);
-      throw new ForbiddenException('Aluno inativo');
+      throw new TransportDeniedException('Aluno inativo', 'INACTIVE_STUDENT');
     }
 
-    const lastEvent = await this.prisma.transportEvent.findFirst({
+    return { card, student };
+  }
+
+  private getLastStudentEvent(studentId: string, deviceId: string) {
+    return this.prisma.transportEvent.findFirst({
       where: {
-        studentId: student.id,
-        deviceId: device.id,
+        studentId,
+        deviceId,
+        type: { in: ['BOARDING', 'DEBOARDING'] },
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
 
-    if (lastEvent?.type === 'BOARDING') {
-      throw new BadRequestException('O aluno já está no ônibus.');
-    }
-
+  private async createStudentEvent(
+    type: 'BOARDING' | 'DEBOARDING',
+    device: any,
+    card: { id: string },
+    student: { id: string; name: string },
+  ) {
     const event = await this.prisma.transportEvent.create({
       data: {
-        type: 'BOARDING',
+        type,
         studentId: student.id,
         rfidCardId: card.id,
         deviceId: device.id,
@@ -176,8 +206,8 @@ export class TransportService {
     });
 
     return {
-      status: 'AUTHORIZED',
-      action: 'BOARDING',
+      status: 'AUTHORIZED' as const,
+      action: type,
       student: {
         id: student.id,
         name: student.name,
@@ -186,58 +216,113 @@ export class TransportService {
     };
   }
 
-  private async processDeboarding(device: any, rfidTag: string) {
-    const card = await this.getCardWithStudent(rfidTag, device.companyId);
+  private async processBoarding(device: any, rfidTag: string) {
+    const { card, student } = await this.resolveStudentCard(device, rfidTag);
+    const lastEvent = await this.getLastStudentEvent(student.id, device.id);
 
-    if (!card || !card.student) {
-      throw new ForbiddenException('TAG não autorizada.');
-    }
-
-    const student = card.student;
-
-    if (
-      card.companyId !== device.companyId ||
-      student.companyId !== device.companyId
-    ) {
-      await this.logDenied(device, card, student.id);
-      throw new ForbiddenException(
-        'A TAG não pertence à mesma empresa do dispositivo.',
+    if (lastEvent?.type === 'BOARDING') {
+      throw new TransportStateException(
+        'O aluno já está no ônibus.',
+        'ALREADY_ON_BOARD',
       );
     }
 
-    const lastEvent = await this.prisma.transportEvent.findFirst({
-      where: {
-        studentId: student.id,
-        deviceId: device.id,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+    return this.createStudentEvent('BOARDING', device, card, student);
+  }
 
-    if (!lastEvent || lastEvent.type !== 'BOARDING') {
-      throw new BadRequestException('O aluno não está no ônibus.');
+  private async processDeboarding(device: any, rfidTag: string) {
+    const { card, student } = await this.resolveStudentCard(device, rfidTag);
+    const lastEvent = await this.getLastStudentEvent(student.id, device.id);
+
+    if (lastEvent?.type !== 'BOARDING') {
+      throw new TransportStateException(
+        'O aluno não está no ônibus.',
+        'NOT_ON_BOARD',
+      );
     }
 
-    const event = await this.prisma.transportEvent.create({
-      data: {
-        type: 'DEBOARDING',
-        studentId: student.id,
-        rfidCardId: card.id,
+    return this.createStudentEvent('DEBOARDING', device, card, student);
+  }
+
+  /**
+   * Captura pedida pelo painel ("Ler TAG no UniHub"): enquanto houver uma
+   * sessão aberta para este device, a leitura só preenche a sessão e não gera
+   * evento de transporte. O updateMany com `tag: null` garante que só a
+   * primeira leitura é aceita, mesmo com duas requisições simultâneas.
+   */
+  private async tryCaptureTag(device: any, tag: string) {
+    const now = new Date();
+    const session = await this.prisma.rfidCaptureSession.findFirst({
+      where: {
         deviceId: device.id,
-        companyId: device.companyId!,
+        companyId: device.companyId,
+        tag: null,
+        cancelledAt: null,
+        expiresAt: { gt: now },
       },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
     });
 
-    return {
-      status: 'AUTHORIZED',
-      action: 'DEBOARDING',
-      student: {
-        id: student.id,
-        name: student.name,
-      },
-      timestamp: event.createdAt,
-    };
+    if (!session) {
+      return false;
+    }
+
+    const result = await this.prisma.rfidCaptureSession.updateMany({
+      where: { id: session.id, tag: null },
+      data: { tag, capturedAt: now },
+    });
+
+    return result.count === 1;
+  }
+
+  /**
+   * Leitura única do UniHub: o firmware só informa a TAG; o backend decide se
+   * é captura (cadastro), embarque ou desembarque pelo último evento do aluno
+   * neste device. Recusas de regra de negócio voltam com HTTP 200 e um
+   * `reason` estável — 4xx fica só para credencial/payload inválidos.
+   */
+  async handleIotRead(dto: IotBoardingDto) {
+    const device = await this.validateDeviceCredentials(dto.code, dto.secret);
+    const tag = requireRfidTag(dto.rfidTag);
+
+    if (await this.tryCaptureTag(device, tag)) {
+      return { mode: 'CAPTURE', status: 'CAPTURED', tag };
+    }
+
+    try {
+      const { card, student } = await this.resolveStudentCard(device, tag);
+      const lastEvent = await this.getLastStudentEvent(student.id, device.id);
+
+      if (
+        lastEvent &&
+        Date.now() - lastEvent.createdAt.getTime() < IOT_REPEAT_WINDOW_MS
+      ) {
+        return {
+          mode: 'TRANSPORT',
+          status: 'IGNORED',
+          reason: 'REPEATED_READ',
+          action: lastEvent.type,
+          student: { id: student.id, name: student.name },
+        };
+      }
+
+      const action = lastEvent?.type === 'BOARDING' ? 'DEBOARDING' : 'BOARDING';
+      const result = await this.createStudentEvent(
+        action,
+        device,
+        card,
+        student,
+      );
+
+      return { mode: 'TRANSPORT', ...result };
+    } catch (error) {
+      if (error instanceof TransportDeniedException) {
+        return { mode: 'TRANSPORT', status: 'DENIED', reason: error.reason };
+      }
+
+      throw error;
+    }
   }
 
   async registerBoarding(

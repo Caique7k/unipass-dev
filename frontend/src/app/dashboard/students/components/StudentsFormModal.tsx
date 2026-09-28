@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { buildApiUrl } from "@/services/api";
+import { RfidCapturePanel } from "./RfidCapturePanel";
 import {
   billingRecurrenceLabels,
   type BillingTemplateRecurrence,
@@ -68,6 +69,10 @@ type Student = {
   routeIds?: string[];
   routes?: {
     route: RouteOption;
+  }[];
+  rfidCards?: {
+    tag: string;
+    active?: boolean;
   }[];
 };
 
@@ -203,6 +208,13 @@ export function StudentModal({
   const [routeDropdownOpen, setRouteDropdownOpen] = useState(false);
 
   const isEdit = !!student?.id;
+  // TAG(s) ativa(s) do aluno em edição: ao vincular outra, são substituídas.
+  const currentTags = isEdit
+    ? (student?.rfidCards ?? [])
+        .filter((card) => card.active !== false)
+        .map((card) => card.tag)
+    : [];
+  const canLinkExisting = isEdit && student?.active !== false;
   const availableGroups = useMemo(() => {
     const options = new Map<string, GroupOption>();
 
@@ -504,6 +516,7 @@ export function StudentModal({
         body: JSON.stringify({
           studentId,
           rfidTag: rfidTag.trim(),
+          replaceExisting: isEdit,
         }),
       });
 
@@ -586,12 +599,24 @@ export function StudentModal({
       }
       footer={
         isLinking ? (
-          <ModalSubmitButton onClick={handleConfirmLink}>
-            Confirmar vínculo
-          </ModalSubmitButton>
+          <>
+            {isEdit && (
+              <ModalCancelButton onClick={() => setIsLinking(false)}>
+                Voltar
+              </ModalCancelButton>
+            )}
+            <ModalSubmitButton onClick={handleConfirmLink}>
+              {currentTags.length > 0 ? "Substituir TAG" : "Confirmar vínculo"}
+            </ModalSubmitButton>
+          </>
         ) : (
           <>
             <ModalCancelButton onClick={() => onOpenChange(false)} />
+            {canLinkExisting && (
+              <ModalCancelButton onClick={() => setIsLinking(true)}>
+                {currentTags.length > 0 ? "Trocar TAG" : "Vincular TAG"}
+              </ModalCancelButton>
+            )}
             <ModalSubmitButton
               onClick={handleSubmit}
               busy={isSaving}
@@ -1128,20 +1153,35 @@ export function StudentModal({
 
                 <div className="rounded-2xl border border-dashed border-border bg-background/80 p-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Aluno criado
+                    {isEdit ? "Aluno" : "Aluno criado"}
                   </p>
                   <p className="mt-2 text-base font-semibold text-foreground">
-                    {createdStudent?.name || "Cadastro concluido"}
+                    {createdStudent?.name || student?.name || "Cadastro concluído"}
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Finalize o processo confirmando o identificador RFID.
+                    {currentTags.length > 0 ? (
+                      <>
+                        TAG atual{" "}
+                        <span className="font-mono text-foreground">
+                          {currentTags.join(", ")}
+                        </span>
+                        . Ao confirmar, ela é liberada e substituída pela nova.
+                      </>
+                    ) : (
+                      "Finalize o processo confirmando o identificador RFID."
+                    )}
                   </p>
                 </div>
               </div>
 
+              <RfidCapturePanel
+                enabled={open && isLinking}
+                onCaptured={setRfidTag}
+              />
+
               <div className="space-y-2 text-center">
                 <p className="text-sm font-medium text-foreground">
-                  Aproxime a TAG do leitor ou digite o código abaixo.
+                  Ou digite o código da TAG.
                 </p>
 
                 <Input

@@ -134,8 +134,8 @@ export default function DevicesPage() {
 
       toast.success(
         removed === 1
-          ? "UniHub desativado com sucesso."
-          : "UniHubs desativados com sucesso.",
+          ? "UniHub removido. O aparelho volta ao modo de pareamento."
+          : "UniHubs removidos. Os aparelhos voltam ao modo de pareamento.",
       );
 
       setDeleteOpen(false);
@@ -147,7 +147,7 @@ export default function DevicesPage() {
         refetch();
       }
     } catch {
-      toast.error("Não foi possível desativar o UniHub.");
+      toast.error("Não foi possível remover o UniHub.");
     } finally {
       setDeleting(false);
     }
@@ -260,7 +260,7 @@ export default function DevicesPage() {
                     Limpar
                   </GhostButton>
                   <GhostButton tone="danger" onClick={() => setDeleteOpen(true)}>
-                    Desativar
+                    Remover
                   </GhostButton>
                 </div>
               </div>
@@ -283,15 +283,15 @@ export default function DevicesPage() {
         onOpenChange={setDeleteOpen}
         onConfirm={handleConfirmDelete}
         busy={deleting}
-        confirmLabel="Desativar"
+        confirmLabel="Remover"
         title={
           selectedIds.length === 1
-            ? "Desativar este UniHub?"
-            : `Desativar ${selectedIds.length} UniHubs?`
+            ? "Remover este UniHub?"
+            : `Remover ${selectedIds.length} UniHubs?`
         }
-        description="O dispositivo é desvinculado da operação da empresa."
+        description="Ele sai do ônibus e da empresa, e as credenciais dele são revogadas. Os embarques já registrados continuam no histórico."
         items={selectedNames}
-        consequence="Ele para de registrar embarques e de enviar localização na hora."
+        consequence="Para de registrar embarques na hora e, na próxima leitura, volta ao modo de pareamento para ser pareado de novo."
       />
     </div>
   );

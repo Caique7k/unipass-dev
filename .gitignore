@@ -2,3 +2,6 @@
 !.env.example
 node_module
 /dist
+
+# Firmware do UniHub: Wi-Fi e DEVICE_API_KEY ficam fora do git
+firmware/**/secrets.h

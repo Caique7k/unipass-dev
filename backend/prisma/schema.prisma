@@ -86,6 +86,7 @@ model Company {
   buses            Bus[]
   devices          Device[]
   rfidCards        RfidCard[]
+  rfidCaptures     RfidCaptureSession[]
   transportEvents  TransportEvent[]
   trips            Trip[]
   routes           Route[]
@@ -114,6 +115,7 @@ model User {
   notificationPrompts NotificationPrompt[]
   pushSubscriptions   PushSubscription[]
   ownedBillingCharges BillingCharge[]        @relation("BillingChargeOwner")
+  rfidCaptures        RfidCaptureSession[]
 
   createdAt DateTime @default(now())
 
@@ -211,11 +213,38 @@ model Device {
   lastUpdate DateTime?
 
   transportEvents TransportEvent[]
+  rfidCaptures    RfidCaptureSession[]
 
   createdAt DateTime @default(now())
 
   @@index([companyId])
   @@index([busId])
+}
+
+// Janela curta em que um UniHub deixa de registrar embarque e passa a
+// "capturar" a próxima TAG lida para o painel vincular a um aluno.
+// Fica no banco (e não em memória) para funcionar com mais de uma réplica da API.
+model RfidCaptureSession {
+  id String @id @default(uuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id])
+
+  requestedById String
+  requestedBy   User   @relation(fields: [requestedById], references: [id])
+
+  expiresAt   DateTime
+  tag         String?
+  capturedAt  DateTime?
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, expiresAt])
+  @@index([companyId])
 }
 
 model RfidCard {
@@ -403,18 +432,18 @@ model PushSubscription {
 
   userId          String
   provider        PushNotificationProvider
-  platform        PushPlatform @default(UNKNOWN)
+  platform        PushPlatform             @default(UNKNOWN)
   token           String
   installationKey String?
   deviceName      String?
   appVersion      String?
-  active          Boolean      @default(true)
-  lastSeenAt      DateTime     @default(now())
+  active          Boolean                  @default(true)
+  lastSeenAt      DateTime                 @default(now())
   lastSentAt      DateTime?
   lastError       String?
   deactivatedAt   DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
 
   user User @relation(fields: [userId], references: [id])
 
