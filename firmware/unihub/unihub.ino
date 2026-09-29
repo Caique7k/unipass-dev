@@ -42,6 +42,9 @@ bool rfidOk = false;
 bool wifiWasConnected = false;
 unsigned long lastRfidInitAttempt = 0;
 unsigned long lastRfidHealthCheck = 0;
+unsigned long rfidRecoveries = 0;
+unsigned long lastHttpAt = 0;
+bool wifiEnabled = true;  // comando "wifi off" no Serial, para diagnóstico
 unsigned long lastWifiLog = 0;
 unsigned long nextPairingStep = 0;
 
@@ -110,6 +113,7 @@ void enterPairing(const char* reason) {
 // Retorna o status HTTP (>0) ou -1 sem rede / falha de conexão.
 int postJson(const char* path, JsonDocument& body, JsonDocument& response) {
   if (WiFi.status() != WL_CONNECTED) return -1;
+  lastHttpAt = millis();
 
   WiFiClient client;
   HTTPClient http;
@@ -140,6 +144,10 @@ int postJson(const char* path, JsonDocument& body, JsonDocument& response) {
 void setupWifi() {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  // Mantém o modem-sleep padrão: testado na placa, WIFI_NONE_SLEEP deixou o
+  // rádio consumindo o tempo todo e o RC522 passou a reiniciar em loop
+  // (sem folga no 3V3). A potência menor corta o pico de transmissão.
+  WiFi.setOutputPower(WIFI_TX_POWER_DBM);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Conectando ao Wi-Fi: ");
@@ -169,10 +177,22 @@ bool wifiReady() {
 // ---------------------------------------------------------------------------
 // RC522
 // ---------------------------------------------------------------------------
+// A MFRC522 (1.4.x) deixa o pino RST como ENTRADA ao final do PCD_Init()
+// quando o chip já estava ligado. Solto, o pino pega ruído (a TAG entrando no
+// campo basta), cai para LOW e o RC522 entra em power-down: perde toda a
+// configuração e para de ler. Por isso o RST é sempre preso em HIGH aqui.
+void holdRfidOutOfReset() {
+  pinMode(RFID_RST_PIN, OUTPUT);
+  digitalWrite(RFID_RST_PIN, HIGH);
+}
+
 void initRfid() {
   lastRfidInitAttempt = millis();
   rfid.PCD_Init();
+  holdRfidOutOfReset();
   delay(50);
+  // Ganho máximo de recepção: lê melhor TAG encostada de relance ou de lado.
+  rfid.PCD_SetAntennaGain(rfid.RxGain_max);
   byte version = rfid.PCD_ReadRegister(rfid.VersionReg);
   rfidOk = version != 0x00 && version != 0xFF;
 
@@ -185,14 +205,15 @@ void initRfid() {
   }
 }
 
-// O RC522 pode voltar ao estado de fábrica sozinho (queda de tensão quando o
-// Wi-Fi transmite, mau contato). O chip continua respondendo no SPI, mas perde
-// a configuração do PCD_Init e para de detectar TAG até um reset. TModeReg é
-// um dos registradores que o PCD_Init grava (0x80); se mudou, o leitor resetou.
+// Rede de segurança: se o RC522 voltar ao estado de fábrica por qualquer
+// motivo (mau contato, queda de tensão), ele continua respondendo no SPI mas
+// para de detectar TAG. TModeReg=0x80 e antena ligada (TxControlReg bits 0-1)
+// são gravados pelo PCD_Init; se sumiram, o leitor resetou.
 bool rfidConfigured() {
   byte version = rfid.PCD_ReadRegister(rfid.VersionReg);
   if (version == 0x00 || version == 0xFF) return false;
-  return rfid.PCD_ReadRegister(rfid.TModeReg) == 0x80;
+  if (rfid.PCD_ReadRegister(rfid.TModeReg) != 0x80) return false;
+  return (rfid.PCD_ReadRegister(rfid.TxControlReg) & 0x03) == 0x03;
 }
 
 void checkRfidHealth() {
@@ -200,7 +221,22 @@ void checkRfidHealth() {
   lastRfidHealthCheck = millis();
 
   if (!rfidConfigured()) {
-    showResult(FB_INFO, "RC522 perdeu a configuracao — reiniciando o leitor.");
+    rfidRecoveries++;
+    showResult(FB_ERROR, String("RC522 perdeu a configuracao (") +
+                             rfidRecoveries + "x) — reiniciando o leitor.");
+    // Diagnóstico: TMode=00 TxCtrl=80 TPresc=00 são os valores de fábrica, ou
+    // seja, o chip REINICIOU (alimentação/RST). Outros valores apontam para
+    // SPI com ruído/mau contato. RST=0 aponta para o fio do RST.
+    char diag[120];
+    snprintf(diag, sizeof(diag),
+             "  diag: TMode=%02X TxCtrl=%02X TPresc=%02X RST=%d WiFi=%s ultimaHTTP=%lums",
+             rfid.PCD_ReadRegister(rfid.TModeReg),
+             rfid.PCD_ReadRegister(rfid.TxControlReg),
+             rfid.PCD_ReadRegister(rfid.TPrescalerReg),
+             digitalRead(RFID_RST_PIN),
+             !wifiEnabled ? "off" : WiFi.status() == WL_CONNECTED ? "on" : "sem-rede",
+             millis() - lastHttpAt);
+    Serial.println(diag);
     initRfid();
   }
 }
@@ -389,11 +425,9 @@ void pollRfid() {
 
   handleTag(tag);
 
-  // A chamada HTTP acabou de usar o rádio (pico de consumo). Reaplica a
-  // configuração do leitor para a próxima TAG não depender do health check.
-  rfid.PCD_Init();
-  lastRfidHealthCheck = millis();
-  Serial.println("Pronto. Aproxime a proxima TAG.");
+  // Confere o leitor logo após a chamada HTTP, antes da próxima TAG.
+  lastRfidHealthCheck = 0;
+  checkRfidHealth();
 }
 
 void handleSerialCommand() {
@@ -405,6 +439,17 @@ void handleSerialCommand() {
 
   if (command == "reset") {
     enterPairing("reset pelo Serial");
+  } else if (command == "wifi off") {
+    // Teste A/B: se as perdas do RC522 somem com o rádio desligado, a causa é
+    // alimentação (pico do Wi-Fi). Leituras não são enviadas nesse modo.
+    wifiEnabled = false;
+    WiFi.mode(WIFI_OFF);
+    rfidRecoveries = 0;
+    showResult(FB_INFO, "Wi-Fi DESLIGADO para teste. Passe TAGs e veja se o RC522 ainda perde a configuracao. 'wifi on' para voltar.");
+  } else if (command == "wifi on") {
+    wifiEnabled = true;
+    rfidRecoveries = 0;
+    setupWifi();
   } else if (command == "status") {
     Serial.print("hardwareId: ");
     Serial.println(hardwareId);
@@ -416,6 +461,8 @@ void handleSerialCommand() {
     Serial.println(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "desconectado");
     Serial.print("RC522: ");
     Serial.println(rfidOk ? "ok" : "nao encontrado");
+    Serial.print("RC522 recuperacoes desde o boot: ");
+    Serial.println(rfidRecoveries);
   }
 }
 
@@ -446,6 +493,12 @@ void setup() {
     showResult(FB_INFO, "Sem credenciais — iniciando pareamento.");
   }
 
+  // Pulso LOW no RST: o PCD_Init faz um hard reset limpo no boot.
+  pinMode(RFID_RST_PIN, OUTPUT);
+  digitalWrite(RFID_RST_PIN, LOW);
+  delay(5);
+  pinMode(RFID_RST_PIN, INPUT);
+
   SPI.begin();
   initRfid();
   setupWifi();
@@ -454,7 +507,7 @@ void setup() {
 void loop() {
   handleSerialCommand();
 
-  bool online = wifiReady();
+  bool online = wifiEnabled && wifiReady();
 
   if (state == STATE_PAIRING && online) {
     pairingStep();
@@ -463,3 +516,4 @@ void loop() {
   pollRfid();
   delay(20);
 }
+

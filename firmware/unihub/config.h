@@ -20,6 +20,10 @@
 #define PAIRING_POLL_MS 5000         // intervalo do claim durante o pareamento
 #define WIFI_STATUS_LOG_MS 10000     // aviso no Serial enquanto estiver sem Wi-Fi
 #define RFID_REINIT_MS 5000          // nova tentativa se o RC522 não responder
-#define RFID_HEALTH_CHECK_MS 2000    // confere se o RC522 não resetou sozinho
+#define RFID_HEALTH_CHECK_MS 500     // confere se o RC522 não resetou sozinho
+
+// Potência de transmissão do Wi-Fi (0 a 20.5). Menos potência = pico de
+// corrente menor no 3V3. Suba se o sinal ficar fraco (RSSI abaixo de -75 dBm).
+#define WIFI_TX_POWER_DBM 15.0
 
 #define CREDENTIALS_FILE "/cred.json"
