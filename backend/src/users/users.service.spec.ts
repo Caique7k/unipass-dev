@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
 
@@ -12,11 +12,31 @@ const admin = {
 const OTHER_USER_ID = '22222222-2222-4222-8222-222222222222';
 const ANOTHER_USER_ID = '33333333-3333-4333-8333-333333333333';
 
+const adminRecord = {
+  id: admin.id,
+  name: 'Admin Horizonte',
+  email: 'admin@horizonte.edu.br',
+  role: UserRole.ADMIN,
+  active: true,
+  studentId: null,
+  companyId: COMPANY.id,
+};
+const driverRecord = {
+  ...adminRecord,
+  id: OTHER_USER_ID,
+  name: 'Motorista Horizonte',
+  email: 'motorista@horizonte.edu.br',
+  role: UserRole.DRIVER,
+};
+
 function buildPrisma() {
   return {
     company: { findUnique: jest.fn().mockResolvedValue(COMPANY) },
     user: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      // 1ª chamada: o usuário editado; as seguintes: checagem de e-mail livre.
+      findFirst: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue({}),
     },
   };
 }
@@ -76,6 +96,44 @@ describe('UsersService', () => {
       await expect(
         service.deactivateMany(admin, [OTHER_USER_ID]),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('update', () => {
+    const lastUpdateArgs = () =>
+      prisma.user.update.mock.lastCall as [Prisma.UserUpdateArgs];
+
+    it('recusa active: false na própria conta, sem tocar no banco', async () => {
+      const attempt = service.update(admin, admin.id, { active: false });
+
+      await expect(attempt).rejects.toThrow(BadRequestException);
+      await expect(attempt).rejects.toThrow('própria conta');
+      expect(prisma.company.findUnique).not.toHaveBeenCalled();
+      expect(prisma.user.findFirst).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('permite editar a própria conta sem desativá-la', async () => {
+      prisma.user.findFirst.mockResolvedValueOnce(adminRecord);
+
+      await service.update(admin, admin.id, { name: 'Admin Novo Nome' });
+
+      const [args] = lastUpdateArgs();
+      expect(args.where).toEqual({ id: admin.id });
+      expect(args.data).toMatchObject({
+        name: 'Admin Novo Nome',
+        active: true,
+      });
+    });
+
+    it('permite desativar outro usuário pelo update', async () => {
+      prisma.user.findFirst.mockResolvedValueOnce(driverRecord);
+
+      await service.update(admin, OTHER_USER_ID, { active: false });
+
+      const [args] = lastUpdateArgs();
+      expect(args.where).toEqual({ id: OTHER_USER_ID });
+      expect(args.data).toMatchObject({ active: false });
     });
   });
 });
