@@ -163,10 +163,14 @@ export class UsersService {
   }
 
   async update(
-    currentUser: { companyId?: string | null },
+    currentUser: { id: string; companyId?: string | null },
     id: string,
     dto: UpdateUserDto,
   ) {
+    if (dto.active === false) {
+      this.ensureNotDeactivatingSelf(currentUser.id, [id]);
+    }
+
     const company = await this.getCompanyOrFail(currentUser.companyId);
 
     const user = await this.prisma.user.findFirst({
