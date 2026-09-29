@@ -245,9 +245,11 @@ export class UsersService {
   }
 
   async deactivateMany(
-    currentUser: { companyId?: string | null },
+    currentUser: { id: string; companyId?: string | null },
     ids: string[],
   ) {
+    this.ensureNotDeactivatingSelf(currentUser.id, ids);
+
     const company = await this.getCompanyOrFail(currentUser.companyId);
 
     const result = await this.prisma.user.updateMany({
@@ -291,6 +293,19 @@ export class UsersService {
   private validateCompanyRole(role: UserRole) {
     if (role === UserRole.PLATFORM_ADMIN) {
       throw new BadRequestException('Esse perfil so pode ser criado na plataforma');
+    }
+  }
+
+  // Usuário inativo perde o acesso na próxima requisição (JwtStrategy); se fosse
+  // o único ADMIN da empresa, ninguém conseguiria reativá-lo pela API.
+  // Compara sem diferenciar maiúsculas porque a API também aceita UUID cru.
+  private ensureNotDeactivatingSelf(currentUserId: string, ids: string[]) {
+    const ownId = currentUserId.toLowerCase();
+
+    if (ids.some((id) => id.toLowerCase() === ownId)) {
+      throw new BadRequestException(
+        'Você não pode desativar a sua própria conta. Peça a outro administrador da empresa para fazer isso.',
+      );
     }
   }
 
