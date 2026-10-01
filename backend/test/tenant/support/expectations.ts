@@ -46,6 +46,29 @@ export function expectNoDataFrom(value: unknown, tenant: Tenant) {
 }
 
 /**
+ * Para quem não tem empresa (companyId nulo): a chamada pode falhar ou
+ * devolver algo, mas nunca dados de nenhuma das empresas.
+ */
+export async function expectNoDataFromAnyCompany(
+  action: () => Promise<unknown>,
+  tenants: Tenant[],
+) {
+  let result: unknown;
+
+  try {
+    result = await action();
+  } catch {
+    return 'recusou';
+  }
+
+  for (const tenant of tenants) {
+    expectNoDataFrom(result, tenant);
+  }
+
+  return 'devolveu sem dados de empresa';
+}
+
+/**
  * A chamada precisa falhar com erro de cliente (4xx). Sucesso ou erro
  * inesperado (500, erro do Prisma) fazem o teste falhar.
  */
