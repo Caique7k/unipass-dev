@@ -1,0 +1,51 @@
+# Testes de isolamento entre empresas com banco de verdade (backend/test/tenant).
+#
+# Projeto separado do docker-compose.yml (name: unipass-test): não usa nem
+# derruba os containers de dev e nunca enxerga o banco de dev. O banco de
+# teste vive em memória (tmpfs), não publica porta e some ao ser desligado.
+#
+#   rodar (de backend/):   npm run test:tenant:docker
+#   desligar o banco:      docker compose -f docker-compose.test.yml down
+name: unipass-test
+
+services:
+  postgres-test:
+    image: postgres:15
+    environment:
+      # Credenciais só deste banco descartável, sem porta publicada.
+      POSTGRES_USER: unipass_test
+      POSTGRES_PASSWORD: unipass_test
+      POSTGRES_DB: unipass_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unipass_test -d unipass_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  backend-test:
+    # Estágio "deps" do Dockerfile do backend: tem as devDependencies (jest),
+    # sem o build de produção. O código entra só para leitura.
+    build:
+      context: ./backend
+      target: deps
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql://unipass_test:unipass_test@postgres-test:5432/unipass_test
+      APP_TIMEZONE: America/Sao_Paulo
+      NODE_ENV: test
+    volumes:
+      - ./backend/src:/app/src:ro
+      - ./backend/test:/app/test:ro
+      - ./backend/prisma:/app/prisma:ro
+      - ./backend/tsconfig.json:/app/tsconfig.json:ro
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    command:
+      [
+        "sh",
+        "-c",
+        "npx prisma generate && npx prisma migrate deploy && npm run test:tenant",
+      ]
