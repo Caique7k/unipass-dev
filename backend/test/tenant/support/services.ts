@@ -2,6 +2,8 @@ import { ConfigService } from '@nestjs/config';
 import { BillingTemplatesService } from 'src/billing/billing-templates.service';
 import { BillingWebhookService } from 'src/billing/billing-webhook.service';
 import { BillingService } from 'src/billing/billing.service';
+import { DevicesService } from 'src/devices/devices.service';
+import { LocationService } from 'src/location/location.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { QueueService } from 'src/queue/queue.service';
 import { RfidService } from 'src/rfid/rfid.service';
@@ -31,6 +33,8 @@ export function buildServices(prisma: PrismaService) {
     billingTemplates: new BillingTemplatesService(prisma),
     rfid: new RfidService(prisma),
     transport: new TransportService(prisma, config),
+    devices: new DevicesService(prisma),
+    location: new LocationService(prisma),
   };
 }
 
