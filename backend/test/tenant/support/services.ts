@@ -1,5 +1,6 @@
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StudentsService } from 'src/students/students.service';
+import { UsersService } from 'src/users/users.service';
 
 /**
  * Os services reais, com o Prisma do banco de teste (sem TestingModule).
@@ -8,6 +9,7 @@ import { StudentsService } from 'src/students/students.service';
 export function buildServices(prisma: PrismaService) {
   return {
     students: new StudentsService(prisma),
+    users: new UsersService(prisma),
   };
 }
 
