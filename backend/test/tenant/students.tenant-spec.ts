@@ -88,9 +88,12 @@ describe('Isolamento entre empresas — alunos', () => {
     });
   });
 
+  // O status fica fixo em 404 ("não existe na sua empresa"): outro 4xx pode
+  // significar que o aluno de B foi achado e recusado depois — e só isso já
+  // revela que o id existe em outra empresa.
   describe('escrita em aluno de B', () => {
     it('editar dá 404 e nenhuma das duas empresas muda', async () => {
-      await nothingChanges(() =>
+      const error = await nothingChanges(() =>
         expectClientError(
           students().update(ctx.a.companyId, ctx.b.student.id, {
             name: 'Invadido',
@@ -98,14 +101,18 @@ describe('Isolamento entre empresas — alunos', () => {
           }),
         ),
       );
+
+      expect(error.getStatus()).toBe(404);
     });
 
     it('desativar dá 404; o aluno e a TAG de B continuam ativos', async () => {
-      await nothingChanges(() =>
+      const error = await nothingChanges(() =>
         expectClientError(
           students().desactivateMany(ctx.a.companyId, [ctx.b.student.id]),
         ),
       );
+
+      expect(error.getStatus()).toBe(404);
     });
 
     it('excluir não exclui ninguém', async () => {
