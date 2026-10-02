@@ -1195,8 +1195,11 @@ export class DashboardService {
                   {
                     devices: {
                       some: {
+                        // Só eventos desta empresa contam como atividade: um
+                        // aparelho pode ter vindo de outra empresa.
                         transportEvents: {
                           some: {
+                            companyId,
                             createdAt: this.buildDateRange(
                               filters.startDate,
                               filters.endDate,

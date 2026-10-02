@@ -292,5 +292,18 @@ describe('Isolamento entre empresas — UniHub que muda de empresa', () => {
         expectNoDataFrom(result, a);
       },
     );
+
+    it('a atividade de B no aparelho não faz o ônibus de A entrar no relatório de frota filtrado por rota', async () => {
+      // O aparelho de B foi para o ônibus avulso de A, que não tem horário
+      // nessa rota nem evento de A.
+      await moveDeviceFromBToA();
+
+      const { report } = await ctx.services.dashboard.getReport(
+        ctx.a.companyId,
+        { reportType: 'fleet', routeId: ctx.a.route.id },
+      );
+
+      expect(report.table.rows.map((row) => row.id)).toEqual([ctx.a.bus.id]);
+    });
   });
 });
