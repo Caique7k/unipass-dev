@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { BillingTemplatesService } from 'src/billing/billing-templates.service';
 import { BillingWebhookService } from 'src/billing/billing-webhook.service';
 import { BillingService } from 'src/billing/billing.service';
+import { DashboardService } from 'src/dashboard/dashboard.service';
 import { DevicesService } from 'src/devices/devices.service';
 import { LocationService } from 'src/location/location.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -35,6 +36,7 @@ export function buildServices(prisma: PrismaService) {
     transport: new TransportService(prisma, config),
     devices: new DevicesService(prisma),
     location: new LocationService(prisma),
+    dashboard: new DashboardService(prisma, config),
   };
 }
 

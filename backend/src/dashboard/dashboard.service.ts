@@ -12,6 +12,11 @@ import {
   getZonedDateParts,
 } from '../notifications/notification-time.util';
 import {
+  eventDeviceSelect,
+  eventsSeenByCompany,
+  onCompanyBus,
+} from '../transport/event-device.util';
+import {
   GetDashboardReportDto,
   type DashboardReportEventType,
   type DashboardReportStudentStatus,
@@ -318,7 +323,7 @@ export class DashboardService {
       schedules,
       promptGroups,
       confirmationGroups,
-      recentEvents,
+      recordedRecentEvents,
     ] = await Promise.all([
       this.prisma.student.count({ where: { companyId, active: true } }),
       this.prisma.student.count({
@@ -392,16 +397,13 @@ export class DashboardService {
           createdAt: true,
           student: { select: { name: true } },
           rfidCard: { select: { tag: true } },
-          device: {
-            select: {
-              name: true,
-              code: true,
-              bus: { select: { plate: true } },
-            },
-          },
+          device: { select: eventDeviceSelect },
         },
       }),
     ]);
+
+    // Aparelho que hoje é de outra empresa aparece como UniHub removido.
+    const recentEvents = eventsSeenByCompany(recordedRecentEvents, companyId);
 
     const series = this.buildMetricsSeries(
       windowEvents,
@@ -781,12 +783,12 @@ export class DashboardService {
     const eventWhere: Prisma.TransportEventWhereInput = {
       companyId,
       createdAt: this.buildDateRange(filters.startDate, filters.endDate),
-      ...(filters.busId ? { device: { busId: filters.busId } } : {}),
+      ...(filters.busId ? onCompanyBus(companyId, filters.busId) : {}),
       ...(filters.eventType !== 'ALL' ? { type: filters.eventType } : {}),
       ...this.buildTransportEventStudentScope(filters),
     };
 
-    const events = await this.prisma.transportEvent.findMany({
+    const recordedEvents = await this.prisma.transportEvent.findMany({
       where: eventWhere,
       orderBy: { createdAt: 'desc' },
       select: {
@@ -820,18 +822,13 @@ export class DashboardService {
           },
         },
         device: {
-          select: {
-            name: true,
-            code: true,
-            bus: {
-              select: {
-                plate: true,
-              },
-            },
-          },
+          select: eventDeviceSelect,
         },
       },
     });
+
+    // Aparelho que hoje é de outra empresa aparece como UniHub removido.
+    const events = eventsSeenByCompany(recordedEvents, companyId);
 
     const chart = this.createDailyChartData(filters.startDate, filters.endDate, {
       boardings: 0,
@@ -951,7 +948,7 @@ export class DashboardService {
       ...this.buildStudentScope(filters),
     };
 
-    const [students, events] = await this.prisma.$transaction([
+    const [students, recordedEvents] = await this.prisma.$transaction([
       this.prisma.student.findMany({
         where: studentWhere,
         orderBy: [{ active: 'desc' }, { name: 'asc' }],
@@ -983,7 +980,7 @@ export class DashboardService {
           studentId: {
             not: null,
           },
-          ...(filters.busId ? { device: { busId: filters.busId } } : {}),
+          ...(filters.busId ? onCompanyBus(companyId, filters.busId) : {}),
           student: {
             ...this.buildStudentScope(filters),
           },
@@ -995,17 +992,14 @@ export class DashboardService {
           type: true,
           createdAt: true,
           device: {
-            select: {
-              bus: {
-                select: {
-                  plate: true,
-                },
-              },
-            },
+            select: eventDeviceSelect,
           },
         },
       }),
     ]);
+
+    // Aparelho que hoje é de outra empresa aparece como UniHub removido.
+    const events = eventsSeenByCompany(recordedEvents, companyId);
 
     const chart = this.createDailyChartData(filters.startDate, filters.endDate, {
       activeStudents: 0,
@@ -1201,8 +1195,11 @@ export class DashboardService {
                   {
                     devices: {
                       some: {
+                        // Só eventos desta empresa contam como atividade: um
+                        // aparelho pode ter vindo de outra empresa.
                         transportEvents: {
                           some: {
+                            companyId,
                             createdAt: this.buildDateRange(
                               filters.startDate,
                               filters.endDate,
@@ -1249,12 +1246,11 @@ export class DashboardService {
         where: {
           companyId,
           createdAt: this.buildDateRange(filters.startDate, filters.endDate),
-          device: {
-            busId: {
-              not: null,
-              ...(filters.busId ? { equals: filters.busId } : {}),
-            },
-          },
+          // Aparelho que hoje é de outra empresa fica de fora, como um removido.
+          ...onCompanyBus(companyId, {
+            not: null,
+            ...(filters.busId ? { equals: filters.busId } : {}),
+          }),
           ...this.buildTransportEventStudentScope(filters),
         },
         orderBy: { createdAt: 'desc' },
@@ -1571,7 +1567,7 @@ export class DashboardService {
           studentId: {
             not: null,
           },
-          ...(filters.busId ? { device: { busId: filters.busId } } : {}),
+          ...(filters.busId ? onCompanyBus(companyId, filters.busId) : {}),
           student: {
             ...studentScope,
           },
@@ -1827,7 +1823,7 @@ export class DashboardService {
           studentId: {
             not: null,
           },
-          ...(filters.busId ? { device: { busId: filters.busId } } : {}),
+          ...(filters.busId ? onCompanyBus(companyId, filters.busId) : {}),
           student: {
             ...studentScope,
           },

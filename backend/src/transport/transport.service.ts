@@ -19,6 +19,7 @@ import {
   TransportDeniedException,
   TransportStateException,
 } from './transport.errors';
+import { eventDeviceSelect, eventsSeenByCompany } from './event-device.util';
 
 // Mesma TAG no mesmo UniHub dentro desta janela é tratada como leitura repetida
 // (aluno segurando o cartão no leitor), e não como embarque seguido de desembarque.
@@ -363,7 +364,7 @@ export class TransportService {
       now.getTime() - 36 * 60 * 60 * 1000,
     );
 
-    const [activeStudents, boardingEvents] = await this.prisma.$transaction([
+    const [activeStudents, recordedBoardings] = await this.prisma.$transaction([
       this.prisma.student.findMany({
         where: {
           companyId,
@@ -396,22 +397,14 @@ export class TransportService {
             select: this.overviewStudentSelect,
           },
           device: {
-            select: {
-              id: true,
-              code: true,
-              name: true,
-              bus: {
-                select: {
-                  id: true,
-                  plate: true,
-                  capacity: true,
-                },
-              },
-            },
+            select: eventDeviceSelect,
           },
         },
       }),
     ]);
+
+    // Aparelho que hoje é de outra empresa aparece como UniHub removido.
+    const boardingEvents = eventsSeenByCompany(recordedBoardings, companyId);
 
     const boardingsByStudent = new Map<
       string,
