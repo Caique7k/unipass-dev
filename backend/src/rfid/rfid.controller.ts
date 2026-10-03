@@ -18,14 +18,15 @@ import { RolesGuard } from 'src/auth/roles.guard';
 
 type AuthRequest = { user: { id: string; companyId: string | null } };
 
-// RolesGuard só barra handlers com @Roles: /rfid/link segue sem restrição de
-// papel, como antes (pendência registrada no CLAUDE.md, seção 12).
+// Vincular ou trocar a TAG: ADMIN e DRIVER (o motorista pode fazer em campo).
+// Captura pelo leitor: só ADMIN.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('rfid')
 export class RfidController {
   constructor(private readonly rfidService: RfidService) {}
 
   @Post('link')
+  @Roles('ADMIN', 'DRIVER')
   link(@Body() dto: LinkRfidDto, @Req() req: any) {
     const companyId = req.user.companyId;
 
