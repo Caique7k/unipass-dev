@@ -6,6 +6,7 @@ import {
   FileBarChart2,
   FileText,
   Home,
+  Landmark,
   Layers3,
   Route,
   Smartphone,
@@ -99,6 +100,16 @@ export function buildNavGroups(role: UserRole | undefined): NavGroup[] {
           icon: Wallet,
           keywords: ["cobranças", "pagamento", "asaas"],
         },
+        ...(canManageCompany
+          ? [
+              {
+                href: "/dashboard/billing/settings",
+                label: "Gateway de cobrança",
+                icon: Landmark,
+                keywords: ["asaas", "gateway", "chave de api", "webhook"],
+              },
+            ]
+          : []),
       ],
     });
   }

@@ -228,15 +228,15 @@ async function main() {
 
   await prisma.companyBillingSettings.upsert({
     where: { companyId: company.id },
+    // Asaas escolhido, mas sem chave: a tela "Gateway de cobrança" mostra a
+    // configuração incompleta. A chave de verdade é colada pelo admin.
     update: {
-      gatewayMode: BillingGatewayMode.PLATFORM_GATEWAY,
-      onboardingStatus: BillingOnboardingStatus.ACTIVE,
+      gatewayMode: BillingGatewayMode.ASAAS,
     },
     create: {
       id: ids.billingSettings,
       companyId: company.id,
-      gatewayMode: BillingGatewayMode.PLATFORM_GATEWAY,
-      onboardingStatus: BillingOnboardingStatus.ACTIVE,
+      gatewayMode: BillingGatewayMode.ASAAS,
       gatewayContactName: 'Mariana Costa',
       gatewayContactEmail: 'financeiro@horizonte.edu.br',
       gatewayContactPhone: '+5511999990001',

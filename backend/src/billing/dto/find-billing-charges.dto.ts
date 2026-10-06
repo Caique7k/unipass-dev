@@ -15,6 +15,7 @@ export const billingChargeStatusFilters = [
   'DRAFT',
   'CANCELLED',
   'FAILED',
+  'REFUNDED',
 ] as const;
 
 export type BillingChargeStatusFilter =

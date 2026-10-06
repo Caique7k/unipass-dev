@@ -11,9 +11,11 @@ import {
   BillingEventSource,
   Prisma,
 } from '@prisma/client';
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { QueueService } from '../queue/queue.service';
+import { safeCompareStrings } from '../security/secure-compare.util';
+import { hashSecret } from './billing-crypto.util';
 
 type AsaasWebhookPayload = Record<string, unknown>;
 type HeaderValue = string | string[] | undefined;
@@ -39,6 +41,8 @@ type ParsedAsaasWebhook = {
   gatewayChargeId: string | null;
   externalReference: string | null;
   asaasCustomerId: string | null;
+  // Empresa dona da URL do webhook (rota por empresa); null na rota legada.
+  endpointCompanyId: string | null;
   deduplicationKey: string;
   payloadHash: string;
 };
@@ -46,7 +50,6 @@ type ParsedAsaasWebhook = {
 type SecurityValidationResult = {
   remoteIp: string | null;
   tokenValidated: boolean;
-  hmacValidated: boolean;
   ipWhitelistApplied: boolean;
 };
 
@@ -91,17 +94,90 @@ export class BillingWebhookService {
     private readonly queueService: QueueService,
   ) {}
 
+  /**
+   * Rota legada (POST /billing/webhook/asaas), de antes do Asaas por empresa:
+   * só aceita com ASAAS_WEBHOOK_TOKEN configurado e enviado no header
+   * "asaas-access-token". Sem token configurado, recusa tudo.
+   */
   async handleAsaasWebhook(input: HandleAsaasWebhookInput) {
-    if (!input.payload || Array.isArray(input.payload)) {
-      throw new BadRequestException('Invalid Asaas webhook payload');
-    }
+    this.assertPayloadShape(input.payload);
 
     const security = this.assertAsaasWebhookSecurity({
       headers: input.headers,
-      rawBody: input.rawBody,
       remoteIp: input.remoteIp,
     });
-    const parsed = this.parseAsaasWebhookPayload(input.payload, input.rawBody);
+
+    return this.receiveWebhook(input, security, null);
+  }
+
+  /**
+   * Webhook da conta Asaas de UMA empresa
+   * (POST /billing/webhook/asaas/:endpointKey). A empresa vem da chave da URL
+   * e o token do header precisa bater com o hash salvo para ela; a cobrança
+   * só é procurada dentro dessa empresa.
+   */
+  async handleCompanyAsaasWebhook(
+    input: HandleAsaasWebhookInput & { endpointKey: string },
+  ) {
+    this.assertPayloadShape(input.payload);
+
+    const settings = await this.prisma.companyBillingSettings.findUnique({
+      where: {
+        asaasWebhookEndpointKey: input.endpointKey,
+      },
+      select: {
+        companyId: true,
+        asaasWebhookTokenHash: true,
+      },
+    });
+    const providedToken = this.readHeaderValue(
+      input.headers ?? {},
+      'asaas-access-token',
+    );
+
+    // Mesma resposta para URL desconhecida e token errado: não revela quais
+    // chaves de URL existem.
+    if (
+      !settings?.asaasWebhookTokenHash ||
+      !providedToken ||
+      !safeCompareStrings(
+        hashSecret(providedToken),
+        settings.asaasWebhookTokenHash,
+      )
+    ) {
+      throw new UnauthorizedException('Invalid Asaas webhook token');
+    }
+
+    const remoteIp = this.resolveRemoteIp(input.remoteIp);
+    const ipWhitelistApplied = this.assertAsaasWebhookIpWhitelist(remoteIp);
+
+    return this.receiveWebhook(
+      input,
+      {
+        remoteIp,
+        tokenValidated: true,
+        ipWhitelistApplied,
+      },
+      settings.companyId,
+    );
+  }
+
+  private assertPayloadShape(payload: AsaasWebhookPayload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new BadRequestException('Invalid Asaas webhook payload');
+    }
+  }
+
+  private async receiveWebhook(
+    input: HandleAsaasWebhookInput,
+    security: SecurityValidationResult,
+    endpointCompanyId: string | null,
+  ) {
+    const parsed = this.parseAsaasWebhookPayload(
+      input.payload,
+      input.rawBody,
+      endpointCompanyId,
+    );
     const eventLog = await this.persistIncomingWebhookEvent({
       parsed,
       security,
@@ -113,14 +189,12 @@ export class BillingWebhookService {
       queued = await this.enqueueWebhookProcessing(eventLog.id);
     }
 
+    // O Asaas só precisa do 200. Nada de ids internos (empresa, cobrança,
+    // log) na resposta para quem está do outro lado do webhook.
     return {
       received: true,
       duplicate: !eventLog.created,
       queued,
-      event: parsed.event,
-      companyId: eventLog.companyId ?? null,
-      matchedChargeId: eventLog.chargeId ?? null,
-      eventLogId: eventLog.id,
     };
   }
 
@@ -166,7 +240,15 @@ export class BillingWebhookService {
       };
     }
 
-    const parsed = this.parseAsaasWebhookPayload(payload);
+    const endpointCompanyId = this.readMetadataString(
+      eventLog.metadata,
+      'endpointCompanyId',
+    );
+    const parsed = this.parseAsaasWebhookPayload(
+      payload,
+      undefined,
+      endpointCompanyId,
+    );
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -402,16 +484,18 @@ export class BillingWebhookService {
     security: SecurityValidationResult;
   }) {
     const mappedCompany =
-      params.parsed.asaasAccountId === null
-        ? null
-        : await this.prisma.companyBillingSettings.findUnique({
-            where: {
-              asaasAccountId: params.parsed.asaasAccountId,
-            },
-            select: {
-              companyId: true,
-            },
-          });
+      params.parsed.endpointCompanyId !== null
+        ? { companyId: params.parsed.endpointCompanyId }
+        : params.parsed.asaasAccountId === null
+          ? null
+          : await this.prisma.companyBillingSettings.findUnique({
+              where: {
+                asaasAccountId: params.parsed.asaasAccountId,
+              },
+              select: {
+                companyId: true,
+              },
+            });
 
     try {
       const created = await this.prisma.billingEventLog.create({
@@ -421,8 +505,10 @@ export class BillingWebhookService {
           source: BillingEventSource.WEBHOOK,
           gatewayEvent: params.parsed.event,
           deduplicationKey: params.parsed.deduplicationKey,
+          ip: params.security.remoteIp,
           payload: this.toJsonValue(params.parsed.payload),
           metadata: this.toJsonValue({
+            endpointCompanyId: params.parsed.endpointCompanyId,
             asaasAccountId: params.parsed.asaasAccountId,
             asaasCustomerId: params.parsed.asaasCustomerId,
             externalReference: params.parsed.externalReference,
@@ -430,7 +516,6 @@ export class BillingWebhookService {
             payloadHash: params.parsed.payloadHash,
             remoteIp: params.security.remoteIp,
             tokenValidated: params.security.tokenValidated,
-            hmacValidated: params.security.hmacValidated,
             ipWhitelistApplied: params.security.ipWhitelistApplied,
             webhookCreatedAt:
               params.parsed.webhookCreatedAt?.toISOString() ??
@@ -563,6 +648,7 @@ export class BillingWebhookService {
   private parseAsaasWebhookPayload(
     payload: AsaasWebhookPayload,
     rawBody?: Buffer,
+    endpointCompanyId: string | null = null,
   ): ParsedAsaasWebhook {
     const account = this.readObject(payload.account);
     const payment = this.readObject(payload.payment);
@@ -586,7 +672,9 @@ export class BillingWebhookService {
       gatewayChargeId: this.readString(payment?.id),
       externalReference: this.readString(payment?.externalReference),
       asaasCustomerId: this.readString(payment?.customer),
+      endpointCompanyId,
       deduplicationKey: this.buildAsaasWebhookDeduplicationKey({
+        endpointCompanyId,
         event,
         eventId,
         gatewayChargeId: this.readString(payment?.id),
@@ -600,44 +688,35 @@ export class BillingWebhookService {
 
   private assertAsaasWebhookSecurity(params: {
     headers?: RequestHeaders;
-    rawBody?: Buffer;
     remoteIp?: string | null;
   }): SecurityValidationResult {
     const headers = params.headers ?? {};
-    const remoteIp = this.resolveRemoteIp(headers, params.remoteIp);
+    const remoteIp = this.resolveRemoteIp(params.remoteIp);
     const tokenValidated = this.assertAsaasWebhookAccessToken(
       this.readHeaderValue(headers, 'asaas-access-token'),
-    );
-    const hmacValidated = this.assertAsaasWebhookSignature(
-      headers,
-      params.rawBody,
     );
     const ipWhitelistApplied = this.assertAsaasWebhookIpWhitelist(remoteIp);
 
     return {
       remoteIp,
       tokenValidated,
-      hmacValidated,
       ipWhitelistApplied,
     };
   }
 
-  private assertAsaasWebhookAccessToken(
-    accessToken?: string | string[] | null,
-  ) {
+  // O Asaas autentica o webhook só pelo header "asaas-access-token" (não há
+  // assinatura HMAC na documentação oficial). Sem token configurado, a rota
+  // legada recusa tudo: antes ela aceitava qualquer requisição.
+  private assertAsaasWebhookAccessToken(accessToken?: string | null) {
     const expectedToken = this.configService
       .get<string>('ASAAS_WEBHOOK_TOKEN')
       ?.trim();
 
-    if (!expectedToken) {
-      return false;
-    }
-
-    const providedToken = Array.isArray(accessToken)
-      ? accessToken[0]
-      : accessToken;
-
-    if (!providedToken || providedToken !== expectedToken) {
+    if (
+      !expectedToken ||
+      !accessToken ||
+      !safeCompareStrings(accessToken, expectedToken)
+    ) {
       throw new UnauthorizedException('Invalid Asaas webhook token');
     }
 
@@ -662,66 +741,18 @@ export class BillingWebhookService {
     return true;
   }
 
-  private assertAsaasWebhookSignature(
-    headers: RequestHeaders,
-    rawBody?: Buffer,
-  ) {
-    const secret = this.configService
-      .get<string>('ASAAS_WEBHOOK_HMAC_SECRET')
-      ?.trim();
-
-    if (!secret) {
-      return false;
-    }
-
-    const algorithm =
-      this.configService.get<string>('ASAAS_WEBHOOK_HMAC_ALGORITHM')?.trim() ||
-      'sha256';
-    const signatureHeaderName =
-      this.configService
-        .get<string>('ASAAS_WEBHOOK_SIGNATURE_HEADER')
-        ?.trim()
-        .toLowerCase() || 'asaas-signature';
-    const providedSignature = this.readHeaderValue(
-      headers,
-      signatureHeaderName,
-    );
-
-    if (!providedSignature) {
-      throw new UnauthorizedException('Missing Asaas webhook signature');
-    }
-
-    if (!rawBody) {
-      throw new UnauthorizedException(
-        'Webhook raw body is required for signature validation',
-      );
-    }
-
-    const normalizedSignature = this.normalizeWebhookSignature(
-      providedSignature,
-      algorithm,
-    );
-    const expectedHexSignature = createHmac(algorithm, secret)
-      .update(rawBody)
-      .digest('hex');
-    const expectedBase64Signature = createHmac(algorithm, secret)
-      .update(rawBody)
-      .digest('base64');
-
-    if (
-      !this.safeCompare(normalizedSignature, expectedHexSignature) &&
-      !this.safeCompare(normalizedSignature, expectedBase64Signature)
-    ) {
-      throw new UnauthorizedException('Invalid Asaas webhook signature');
-    }
-
-    return true;
-  }
-
   private async resolveWebhookTargets(
     prisma: BillingDataClient,
     parsed: ParsedAsaasWebhook,
   ): Promise<ResolvedWebhookTargets> {
+    if (parsed.endpointCompanyId) {
+      return this.resolveCompanyScopedTargets(
+        prisma,
+        parsed,
+        parsed.endpointCompanyId,
+      );
+    }
+
     const [mappedCompany, asaasCustomer] = await Promise.all([
       parsed.asaasAccountId
         ? prisma.companyBillingSettings.findUnique({
@@ -817,7 +848,58 @@ export class BillingWebhookService {
     };
   }
 
+  /**
+   * Webhook que chegou pela URL de uma empresa: cobrança e cliente só são
+   * aceitos se forem dessa empresa. Um id do Asaas de outra empresa no
+   * payload é tratado como "cobrança não encontrada".
+   */
+  private async resolveCompanyScopedTargets(
+    prisma: BillingDataClient,
+    parsed: ParsedAsaasWebhook,
+    companyId: string,
+  ): Promise<ResolvedWebhookTargets> {
+    const [customer, chargeById] = await Promise.all([
+      parsed.asaasCustomerId
+        ? prisma.billingCustomer.findFirst({
+            where: { companyId, asaasCustomerId: parsed.asaasCustomerId },
+            select: { id: true, companyId: true },
+          })
+        : Promise.resolve(null),
+      parsed.gatewayChargeId
+        ? prisma.billingCharge.findFirst({
+            where: { companyId, gatewayChargeId: parsed.gatewayChargeId },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    const chargeByReference =
+      !chargeById && parsed.externalReference
+        ? await prisma.billingCharge.findUnique({
+            where: {
+              companyId_externalReference: {
+                companyId,
+                externalReference: parsed.externalReference,
+              },
+            },
+            select: { id: true },
+          })
+        : null;
+    const chargeId = chargeById?.id ?? chargeByReference?.id ?? null;
+
+    return {
+      companyId,
+      matchedBy: chargeById
+        ? 'gatewayChargeId'
+        : chargeByReference
+          ? 'externalReference'
+          : null,
+      charge: chargeId ? await this.getChargeSnapshot(prisma, chargeId) : null,
+      customer,
+    };
+  }
+
   private buildAsaasWebhookDeduplicationKey(params: {
+    endpointCompanyId: string | null;
     event: string;
     eventId: string | null;
     gatewayChargeId: string | null;
@@ -825,8 +907,14 @@ export class BillingWebhookService {
     webhookCreatedAt: string | null;
     payloadHash: string;
   }) {
+    // Na rota por empresa a chave leva a empresa: um evento enviado com o
+    // token de A nunca "ocupa" o id de um evento real de B.
+    const prefix = params.endpointCompanyId
+      ? `asaas:${params.endpointCompanyId}`
+      : 'asaas';
+
     if (params.eventId) {
-      return `asaas:event:${params.eventId}`;
+      return `${prefix}:event:${params.eventId}`;
     }
 
     const parts = [
@@ -837,10 +925,10 @@ export class BillingWebhookService {
     ].filter((value): value is string => !!value);
 
     if (parts.length > 0) {
-      return `asaas:${parts.join(':')}`;
+      return `${prefix}:${parts.join(':')}`;
     }
 
-    return `asaas:payload:${params.payloadHash}`;
+    return `${prefix}:payload:${params.payloadHash}`;
   }
 
   private buildChargeUpdateFromAsaasWebhook(params: {
@@ -952,32 +1040,38 @@ export class BillingWebhookService {
     return this.mapAsaasPaymentStatusToChargeStatus(gatewayStatus);
   }
 
+  /**
+   * Evento do Asaas -> status do UniPass (nomes conferidos em
+   * docs.asaas.com, "Eventos para cobranças"). null = o evento sozinho não
+   * define o status e vale o payment.status do payload. É o caso de
+   * "visualizou o boleto" e "alterou valor/vencimento": tratá-los como
+   * ISSUED fazia um boleto já pago voltar a "emitido".
+   */
   private mapAsaasEventToChargeStatus(event: string) {
     switch (event) {
       case 'PAYMENT_CREATED':
-      case 'PAYMENT_UPDATED':
       case 'PAYMENT_RESTORED':
-      case 'PAYMENT_BANK_SLIP_VIEWED':
-      case 'PAYMENT_CHECKOUT_VIEWED':
+      case 'PAYMENT_RECEIVED_IN_CASH_UNDONE':
         return BillingChargeStatus.ISSUED;
       case 'PAYMENT_CONFIRMED':
       case 'PAYMENT_RECEIVED':
+      case 'PAYMENT_DUNNING_RECEIVED':
         return BillingChargeStatus.PAID;
       case 'PAYMENT_OVERDUE':
       case 'PAYMENT_DUNNING_REQUESTED':
-      case 'PAYMENT_DUNNING_RECEIVED':
         return BillingChargeStatus.OVERDUE;
       case 'PAYMENT_DELETED':
       case 'PAYMENT_BANK_SLIP_CANCELLED':
-      case 'PAYMENT_REFUNDED':
-      case 'PAYMENT_PARTIALLY_REFUNDED':
-      case 'PAYMENT_RECEIVED_IN_CASH_UNDONE':
         return BillingChargeStatus.CANCELLED;
+      case 'PAYMENT_REFUNDED':
+        return BillingChargeStatus.REFUNDED;
       case 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED':
       case 'PAYMENT_REPROVED_BY_RISK_ANALYSIS':
       case 'PAYMENT_REFUND_DENIED':
         return BillingChargeStatus.FAILED;
       default:
+        // PAYMENT_UPDATED, PAYMENT_BANK_SLIP_VIEWED, PAYMENT_CHECKOUT_VIEWED,
+        // PAYMENT_PARTIALLY_REFUNDED, PAYMENT_REFUND_IN_PROGRESS...
         return null;
     }
   }
@@ -991,13 +1085,15 @@ export class BillingWebhookService {
       case 'CONFIRMED':
       case 'RECEIVED':
       case 'RECEIVED_IN_CASH':
+      case 'DUNNING_RECEIVED':
         return BillingChargeStatus.PAID;
       case 'OVERDUE':
+      case 'DUNNING_REQUESTED':
         return BillingChargeStatus.OVERDUE;
       case 'DELETED':
-      case 'REFUNDED':
-      case 'RECEIVED_IN_CASH_UNDONE':
         return BillingChargeStatus.CANCELLED;
+      case 'REFUNDED':
+        return BillingChargeStatus.REFUNDED;
       default:
         return null;
     }
@@ -1042,8 +1138,11 @@ export class BillingWebhookService {
     namespace: number,
     resourceId: string,
   ) {
+    // O Prisma manda número JS como bigint, e não existe
+    // pg_advisory_xact_lock(bigint, integer): sem o ::int, todo webhook
+    // falhava ao processar (só a versão de dois int4 aceita o hashtext).
     await prisma.$executeRaw`
-      SELECT pg_advisory_xact_lock(${namespace}, hashtext(${resourceId}))
+      SELECT pg_advisory_xact_lock(${namespace}::int, hashtext(${resourceId}))
     `;
   }
 
@@ -1068,38 +1167,11 @@ export class BillingWebhookService {
     });
   }
 
-  private normalizeWebhookSignature(signature: string, algorithm: string) {
-    const trimmed = signature.trim();
-    const prefix = `${algorithm.toLowerCase()}=`;
-
-    if (trimmed.toLowerCase().startsWith(prefix)) {
-      return trimmed.slice(prefix.length);
-    }
-
-    return trimmed;
-  }
-
-  private safeCompare(left: string, right: string) {
-    const leftBuffer = Buffer.from(left);
-    const rightBuffer = Buffer.from(right);
-
-    if (leftBuffer.length !== rightBuffer.length) {
-      return false;
-    }
-
-    return timingSafeEqual(leftBuffer, rightBuffer);
-  }
-
-  private resolveRemoteIp(
-    headers: RequestHeaders,
-    remoteIp?: string | null,
-  ): string | null {
-    const forwardedFor = this.readHeaderValue(headers, 'x-forwarded-for');
-    const realIp = this.readHeaderValue(headers, 'x-real-ip');
-    const candidate =
-      realIp || remoteIp || forwardedFor?.split(',')[0]?.trim() || null;
-
-    return candidate ? this.normalizeIp(candidate) : null;
+  // Só o IP que o Express viu (req.ip). Headers como x-real-ip e
+  // x-forwarded-for vêm do próprio cliente e burlariam a allowlist; atrás de
+  // um proxy confiável, o certo é configurar "trust proxy" no Express.
+  private resolveRemoteIp(remoteIp?: string | null): string | null {
+    return remoteIp ? this.normalizeIp(remoteIp) : null;
   }
 
   private normalizeIp(value: string) {
@@ -1134,6 +1206,10 @@ export class BillingWebhookService {
       ...currentObject,
       ...patch,
     };
+  }
+
+  private readMetadataString(metadata: Prisma.JsonValue | null, key: string) {
+    return this.readString(this.readObject(metadata)?.[key]);
   }
 
   private readMetadataNumber(metadata: Prisma.JsonValue | null, key: string) {

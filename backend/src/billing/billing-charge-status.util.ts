@@ -4,6 +4,7 @@ import { BillingChargeStatus, Prisma } from '@prisma/client';
 export const CLOSED_CHARGE_STATUSES: BillingChargeStatus[] = [
   BillingChargeStatus.PAID,
   BillingChargeStatus.CANCELLED,
+  BillingChargeStatus.REFUNDED,
 ];
 
 /** Cobranças vivas, que ainda podem vencer. */
@@ -18,6 +19,7 @@ export const OVERDUE_IGNORED_STATUSES: BillingChargeStatus[] = [
   BillingChargeStatus.PAID,
   BillingChargeStatus.CANCELLED,
   BillingChargeStatus.FAILED,
+  BillingChargeStatus.REFUNDED,
 ];
 
 /**
