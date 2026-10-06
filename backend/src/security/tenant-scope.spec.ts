@@ -24,7 +24,9 @@ import { IS_PUBLIC_KEY } from '../auth/public.decorator';
 // pública: sem usuário logado, não existe empresa para trocar.
 const ROUTES_WITHOUT_DTO: Record<string, string> = {
   'POST /billing/webhook/asaas':
-    'webhook do ASAAS: valida token + HMAC + IP em billing-webhook.service.ts',
+    'webhook do ASAAS (rota legada): payload livre do Asaas; valida ASAAS_WEBHOOK_TOKEN + IP em billing-webhook.service.ts',
+  'POST /billing/webhook/asaas/:endpointKey':
+    'webhook do ASAAS por empresa: payload livre do Asaas; a empresa vem da endpointKey (DTO) e o token é conferido contra o hash salvo em billing-webhook.service.ts',
 };
 
 const CLIENT_INPUTS: Partial<Record<RouteParamtypes, string>> = {
