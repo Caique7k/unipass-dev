@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { BillingAuditService } from 'src/billing/billing-audit.service';
 import { BillingGatewayService } from 'src/billing/billing-gateway.service';
+import { BillingBatchesService } from 'src/billing/billing-batches.service';
 import { BillingIssuanceService } from 'src/billing/billing-issuance.service';
 import { BillingTemplatesService } from 'src/billing/billing-templates.service';
 import { BillingWebhookService } from 'src/billing/billing-webhook.service';
@@ -43,6 +44,14 @@ export function buildServices(prisma: PrismaService) {
     config,
     {} as QueueService,
   );
+  const billingIssuance = new BillingIssuanceService(
+    prisma,
+    billingConfig,
+    billingGateway,
+    billingAudit,
+    billingWebhook,
+  );
+  const issueJobs: string[] = [];
 
   return {
     students: new StudentsService(prisma, billingConfig),
@@ -50,13 +59,23 @@ export function buildServices(prisma: PrismaService) {
     billing: new BillingService(prisma, billingWebhook, billingConfig),
     billingTemplates: new BillingTemplatesService(prisma),
     billingGateway,
-    billingIssuance: new BillingIssuanceService(
+    billingIssuance,
+    billingBatches: new BillingBatchesService(
       prisma,
       billingConfig,
       billingGateway,
+      billingIssuance,
       billingAudit,
+      {
+        addBillingIssueJob: ({ chargeId }: { chargeId: string }) => {
+          issueJobs.push(chargeId);
+          return Promise.resolve();
+        },
+      } as unknown as QueueService,
       billingWebhook,
     ),
+    // Jobs que o lote mandaria para a fila "billing-issue" (sem Redis).
+    issueJobs,
     // Webhook com fila falsa: os testes chamam o processamento direto.
     billingWebhookReceiver: new BillingWebhookService(prisma, config, {
       addBillingWebhookJob: () => Promise.resolve(),

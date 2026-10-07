@@ -210,9 +210,25 @@ async function seedTenant(
       phone: '+5511900000002',
     },
   });
+  // Lote já concluído, dono da cobrança da fixture (emissão em massa).
+  const billingBatch = await prisma.billingBatch.create({
+    data: {
+      companyId,
+      templateId: billingTemplate.id,
+      referenceMonth: '2026-09',
+      issueDate: new Date(Date.UTC(2026, 8, 1, 12)),
+      gateway: 'EXTERNAL',
+      status: 'COMPLETED',
+      total: 1,
+      succeeded: 1,
+      createdByUserId: admin.id,
+      completedAt: new Date(Date.UTC(2026, 8, 1, 12)),
+    },
+  });
   const charge = await prisma.billingCharge.create({
     data: {
       companyId,
+      batchId: billingBatch.id,
       templateId: billingTemplate.id,
       ownerUserId: parent.id,
       studentId: student.id,
@@ -289,6 +305,7 @@ async function seedTenant(
     spareStudent,
     rfidCard,
     billingCustomer,
+    billingBatch,
     charge,
     boarding,
     captureSession,

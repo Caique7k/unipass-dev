@@ -33,8 +33,6 @@ describe('Isolamento entre empresas — financeiro', () => {
     );
   const bUnchanged = <T>(action: () => Promise<T>) =>
     expectCompaniesUnchanged(ctx.prisma, [ctx.b.companyId], action);
-  // Um mês sem nenhuma cobrança na fixture (a dela é de setembro/2026).
-  const DECEMBER = { referenceMonth: '2026-12', issueDate: '2026-12-01' };
 
   describe('cobranças e visão geral', () => {
     it('a visão geral do admin de A só tem cobranças e configuração de A', async () => {
@@ -100,38 +98,6 @@ describe('Isolamento entre empresas — financeiro', () => {
 
       expect(result).toMatchObject({ data: [], total: 0 });
       expectNoDataFrom(result, ctx.b);
-    });
-  });
-
-  describe('emissão e configuração', () => {
-    it('emitir com o grupo de boletos de B dá 400 e nada muda', async () => {
-      const error = await nothingChanges(() =>
-        expectClientError(
-          billing().issueCharges(ctx.a.companyId, {
-            ...DECEMBER,
-            templateId: ctx.b.billingTemplate.id,
-          }),
-        ),
-      );
-
-      expect(error.getStatus()).toBe(400);
-      expectNoDataFrom(error, ctx.b);
-    });
-
-    it('emitir em lote só cobra alunos de A', async () => {
-      const result = await bUnchanged(() =>
-        billing().issueCharges(ctx.a.companyId, DECEMBER),
-      );
-
-      expect(result.created.map((charge) => charge.studentName)).toEqual([
-        ctx.a.student.name,
-      ]);
-      expectNoDataFrom(result, ctx.b);
-      await expect(
-        ctx.prisma.billingCharge.count({
-          where: { companyId: ctx.a.companyId },
-        }),
-      ).resolves.toBe(2);
     });
   });
 
@@ -441,7 +407,6 @@ describe('Isolamento entre empresas — financeiro', () => {
       await nothingChanges(async () => {
         await expectClientError(billing().getOverview(platformUser()));
         await expectClientError(billing().findCharges(platformUser()));
-        await expectClientError(billing().issueCharges(null, DECEMBER));
         await expectClientError(gateway.getGateway(null));
         await expectClientError(
           gateway.setGateway(noCompanyActor, BillingGatewayMode.ASAAS),

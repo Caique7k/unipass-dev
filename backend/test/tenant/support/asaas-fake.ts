@@ -21,7 +21,8 @@ type FakePayment = AsaasPaymentInput & { id: string; deleted: boolean };
  * - timeoutAfterCreatePayment: cria a cobrança e lança timeout (o pior caso:
  *   existe no Asaas, mas o UniPass não recebeu a resposta);
  * - failCreatePayment: recusa criar (erro de validação do Asaas);
- * - failPix: QR Code Pix indisponível.
+ * - failPix: QR Code Pix indisponível;
+ * - unavailableCreatePayment: Asaas fora do ar (5xx) sem criar nada.
  */
 export function buildAsaasFake() {
   const keysUsed: string[] = [];
@@ -32,6 +33,7 @@ export function buildAsaasFake() {
     timeoutAfterCreatePayment: false,
     failCreatePayment: false,
     failPix: false,
+    unavailableCreatePayment: false,
   };
   let sequence = 0;
 
@@ -90,6 +92,11 @@ export function buildAsaasFake() {
       },
       createPayment: (input: AsaasPaymentInput) => {
         calls.push('createPayment');
+        if (failures.unavailableCreatePayment) {
+          return Promise.reject(
+            new AsaasApiError('unavailable', 'createPayment', 503),
+          );
+        }
         if (failures.failCreatePayment) {
           return Promise.reject(
             new AsaasApiError('validation', 'createPayment', 400, [
@@ -177,6 +184,7 @@ export function buildAsaasFake() {
       failures.timeoutAfterCreatePayment = false;
       failures.failCreatePayment = false;
       failures.failPix = false;
+      failures.unavailableCreatePayment = false;
     },
   };
 }
