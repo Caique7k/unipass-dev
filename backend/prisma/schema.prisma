@@ -35,6 +35,16 @@ enum AsaasConnectionCheck {
   FAILED
 }
 
+// Lote de emissão em massa. PROCESSING enquanto houver cobrança pendente
+// (só no Asaas, pela fila do worker); os contadores são recalculados a
+// partir das cobranças do lote (billing-batches.service.ts).
+enum BillingBatchStatus {
+  PROCESSING
+  COMPLETED
+  PARTIAL_FAILURE
+  FAILED
+}
+
 enum BillingAuditOutcome {
   SUCCESS
   FAILURE
@@ -111,6 +121,7 @@ model Company {
   billingCustomers BillingCustomer[]
   billingCharges   BillingCharge[]
   billingEventLogs BillingEventLog[]
+  billingBatches   BillingBatch[]
 
   @@index([requestedPlan, planChangeRequestedAt])
 }
@@ -133,6 +144,7 @@ model User {
   billingAuditLogs        BillingEventLog[]      @relation("BillingAuditActor")
   issuedBillingCharges    BillingCharge[]        @relation("BillingChargeIssuedBy")
   cancelledBillingCharges BillingCharge[]        @relation("BillingChargeCancelledBy")
+  createdBillingBatches   BillingBatch[]
   rfidCaptures            RfidCaptureSession[]
 
   createdAt DateTime @default(now())
@@ -531,6 +543,7 @@ model BillingTemplate {
 
   charges  BillingCharge[]
   students Student[]       @relation("StudentBillingTemplate")
+  batches  BillingBatch[]
 
   @@index([companyId, active, createdAt])
 }
@@ -613,6 +626,8 @@ model BillingCharge {
   gatewayAttempts        Int                 @default(0)
   // Trava de envio ao gateway: evita duas tentativas simultâneas.
   gatewaySyncStartedAt   DateTime?
+  batchId                String?
+  batch                  BillingBatch?       @relation(fields: [batchId], references: [id], onDelete: SetNull)
   issuedByUserId         String?
   issuedByUser           User?               @relation("BillingChargeIssuedBy", fields: [issuedByUserId], references: [id], onDelete: SetNull)
   cancelledAt            DateTime?
@@ -627,6 +642,33 @@ model BillingCharge {
   @@index([ownerUserId, status, dueDate])
   @@index([studentId, dueDate])
   @@index([customerId, dueDate])
+  @@index([batchId, status])
+}
+
+model BillingBatch {
+  id              String             @id @default(uuid())
+  companyId       String
+  company         Company            @relation(fields: [companyId], references: [id])
+  // Nulo = todos os grupos de boletos ativos.
+  templateId      String?
+  template        BillingTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  referenceMonth  String
+  issueDate       DateTime
+  gateway         BillingGatewayMode
+  status          BillingBatchStatus @default(PROCESSING)
+  total           Int                @default(0)
+  succeeded       Int                @default(0)
+  failed          Int                @default(0)
+  // Alunos pedidos que não entraram (não estavam prontos na confirmação).
+  skipped         Int                @default(0)
+  skippedDetails  Json?
+  createdByUserId String?
+  createdByUser   User?              @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime           @default(now())
+  completedAt     DateTime?
+  charges         BillingCharge[]
+
+  @@index([companyId, createdAt])
 }
 
 model BillingEventLog {

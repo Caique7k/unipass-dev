@@ -20,7 +20,6 @@ import { BillingIssuanceService } from './billing-issuance.service';
 import { BillingService } from './billing.service';
 import { BillingWebhookService } from './billing-webhook.service';
 import { FindBillingChargesDto } from './dto/find-billing-charges.dto';
-import { IssueBillingChargesDto } from './dto/issue-billing-charges.dto';
 import { IssueSingleChargeDto } from './dto/issue-single-charge.dto';
 import { AsaasWebhookParamsDto } from './dto/billing-gateway.dto';
 
@@ -105,15 +104,6 @@ export class BillingController {
       month: query.month,
       status: query.status,
     });
-  }
-
-  @Post('charges/issue')
-  @Roles('ADMIN')
-  issueCharges(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: IssueBillingChargesDto,
-  ) {
-    return this.billingService.issueCharges(req.user.companyId, dto);
   }
 
   /** Revisão antes de emitir: o que será cobrado e o que impede a emissão. */

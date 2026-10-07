@@ -5,12 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import {
-  CalendarClock,
   FilePlus2,
-  LoaderCircle,
   RefreshCw,
   Search,
-  SendHorizontal,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -32,7 +29,6 @@ import {
 } from "./settings/types/billing-gateway";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import {
   Pagination,
@@ -59,6 +55,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import api from "@/services/api";
+import { BulkIssuePanel } from "./components/BulkIssuePanel";
 import { ChargeDetailModal } from "./components/ChargeDetailModal";
 import { IssueChargeModal } from "./components/IssueChargeModal";
 import {
@@ -111,23 +108,12 @@ type BillingGroupsResponse = {
   lastPage: number;
 };
 
-type BillingIssueResponse = {
-  createdCount: number;
-  skippedCount: number;
-};
-
 type ChargeFilters = {
   search: string;
   month: string;
   status: BillingChargeStatusFilter;
   templateId: string;
   page: number;
-};
-
-type BillingIssueForm = {
-  templateId: string;
-  referenceMonth: string;
-  issueDate: string;
 };
 
 const chargeStatusFilterOptions: Array<{
@@ -187,18 +173,6 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
-function formatMonthLabel(value?: string | null) {
-  if (!value) return "--";
-
-  const match = /^(\d{4})-(\d{2})/.exec(value);
-
-  if (!match) {
-    return value;
-  }
-
-  return `${match[2]}/${match[1]}`;
-}
-
 function formatStatus(status: BillingChargeStatus) {
   const labels: Record<string, string> = {
     DRAFT: "Rascunho",
@@ -252,14 +226,6 @@ function buildDefaultChargeFilters(): ChargeFilters {
     status: "ALL",
     templateId: "all",
     page: 1,
-  };
-}
-
-function buildDefaultIssueForm(): BillingIssueForm {
-  return {
-    templateId: "all",
-    referenceMonth: getCurrentMonthKey(),
-    issueDate: getDateKey(),
   };
 }
 
@@ -317,11 +283,7 @@ export default function BillingPage() {
   const [chargeLastPage, setChargeLastPage] = useState(1);
   const [chargeTotal, setChargeTotal] = useState(0);
   const [templateOptions, setTemplateOptions] = useState<BillingGroup[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [issueForm, setIssueForm] = useState<BillingIssueForm>(
-    buildDefaultIssueForm,
-  );
-  const [issuing, setIssuing] = useState(false);
+  const [, setTemplatesLoading] = useState(false);
   const [issueModalOpen, setIssueModalOpen] = useState(false);
   const [detailChargeId, setDetailChargeId] = useState<string | null>(null);
 
@@ -445,13 +407,6 @@ export default function BillingPage() {
   }, [canAccess, fetchTemplates]);
 
 
-  const selectedTemplate = useMemo(
-    () =>
-      templateOptions.find((template) => template.id === issueForm.templateId) ??
-      null,
-    [issueForm.templateId, templateOptions],
-  );
-
   const selectedChargeTemplate = useMemo(
     () =>
       templateOptions.find((template) => template.id === chargeFilters.templateId) ??
@@ -459,22 +414,11 @@ export default function BillingPage() {
     [chargeFilters.templateId, templateOptions],
   );
 
-  const issueLinkedStudents = useMemo(() => {
-    if (issueForm.templateId === "all") {
-      return templateOptions.reduce(
-        (total, template) => total + template._count.students,
-        0,
-      );
-    }
-
-    return selectedTemplate?._count.students ?? 0;
-  }, [issueForm.templateId, selectedTemplate, templateOptions]);
-
   const availableTabs = useMemo(() => {
     const tabs: Array<{ id: BillingTab; label: string }> = [];
 
     if (canIssueCharges) {
-      tabs.push({ id: "issue", label: "Emissao em lote" });
+      tabs.push({ id: "issue", label: "Emissão em massa" });
     }
 
     tabs.push({
@@ -522,70 +466,11 @@ export default function BillingPage() {
     ]);
   }
 
-  async function handleIssueCharges() {
-    if (!issueForm.referenceMonth) {
-      toast.error("Selecione o mes de referencia.");
-      return;
-    }
-
-    if (!issueForm.issueDate) {
-      toast.error("Selecione a data de emissao.");
-      return;
-    }
-
-    setIssuing(true);
-
-    try {
-      const response = await api.post<BillingIssueResponse>(
-        "/billing/charges/issue",
-        {
-          referenceMonth: issueForm.referenceMonth,
-          issueDate: issueForm.issueDate,
-          ...(issueForm.templateId !== "all"
-            ? { templateId: issueForm.templateId }
-            : {}),
-        },
-      );
-
-      const nextFilters: ChargeFilters = {
-        ...chargeFilters,
-        month: issueForm.referenceMonth,
-        templateId: issueForm.templateId,
-        status: "ALL",
-        page: 1,
-      };
-
-      setChargeFilters(nextFilters);
-      setActiveTab("charges");
-      toast.success(
-        response.data.skippedCount > 0
-          ? `${response.data.createdCount} boleto(s) emitido(s) e ${response.data.skippedCount} ignorado(s).`
-          : `${response.data.createdCount} boleto(s) emitido(s) com sucesso.`,
-      );
-
-      await Promise.all([
-        fetchOverview(),
-        fetchCharges(nextFilters),
-        canViewTemplateCatalog ? fetchTemplates() : Promise.resolve(),
-      ]);
-    } catch (error: unknown) {
-      toast.error(
-        getErrorMessage(error, "Nao foi possivel emitir os boletos."),
-      );
-    } finally {
-      setIssuing(false);
-    }
-  }
-
   const { pages, start, end } = buildPaginationPages(
     chargeFilters.page,
     chargeLastPage,
   );
 
-  const issueTemplateLabel =
-    issueForm.templateId === "all"
-      ? "Todos os grupos ativos"
-      : selectedTemplate?.name ?? "Grupo nao encontrado";
   const chargeTemplateLabel =
     chargeFilters.templateId === "all"
       ? "Todos os grupos"
@@ -646,162 +531,12 @@ export default function BillingPage() {
       )}
 
           {activeTab === "issue" && canIssueCharges && (
-            <Card className="rounded-3xl border border-border/60">
-              <CardHeader className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff2ea] text-[#ff5c00] dark:bg-[#2d211a]">
-                    <CalendarClock className="size-5" />
-                  </div>
-                  <div>
-                    <CardTitle>Emissao em lote</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      O valor e o vencimento saem do grupo vinculado em cada
-                      aluno. Aqui voce define o mes e a data de emissao do lote.
-                    </p>
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent className="space-y-5">
-                {overview.gateway === "ASAAS" ? (
-                  <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm">
-                    A emissão em lote ainda não envia ao Asaas (chega na
-                    próxima etapa). Enquanto isso, use{" "}
-                    <button
-                      type="button"
-                      className="font-medium underline underline-offset-2"
-                      onClick={() => setIssueModalOpen(true)}
-                    >
-                      Emitir boleto
-                    </button>
-                    , um aluno por vez.
-                  </div>
-                ) : templateOptions.length === 0 && !templatesLoading ? (
-                  <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-5 text-sm text-muted-foreground">
-                    Cadastre grupos de boletos e vincule-os aos alunos para
-                    liberar a emissao em lote.
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid gap-4 md:grid-cols-3">
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">
-                          Grupo de boletos
-                        </label>
-                        <Select
-                          value={issueForm.templateId}
-                          onValueChange={(value) =>
-                            setIssueForm((current) => ({
-                              ...current,
-                              templateId: value ?? "all",
-                            }))
-                          }
-                        >
-                          <SelectTrigger className="h-11 rounded-2xl">
-                            <SelectValue placeholder="Todos os grupos ativos">
-                              {issueTemplateLabel}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">
-                              Todos os grupos ativos
-                            </SelectItem>
-                            {templateOptions.map((template) => (
-                              <SelectItem key={template.id} value={template.id}>
-                                {template.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <Field
-                        label="Mes de referencia"
-                        value={issueForm.referenceMonth}
-                        onChange={(value) =>
-                          setIssueForm((current) => ({
-                            ...current,
-                            referenceMonth: value,
-                          }))
-                        }
-                        placeholder="AAAA-MM"
-                        type="month"
-                      />
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">
-                          Data de emissao
-                        </label>
-                        <DatePicker
-                          value={issueForm.issueDate}
-                          onChange={(value) =>
-                            setIssueForm((current) => ({
-                              ...current,
-                              issueDate: value,
-                            }))
-                          }
-                          placeholder="Selecione a data de emissao"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(260px,0.8fr)]">
-                      <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
-                        <p className="text-sm font-medium">Resumo da emissao</p>
-                        <div className="mt-3 grid gap-3 md:grid-cols-2">
-                          <StaticField
-                            label="Grupo selecionado"
-                            value={issueTemplateLabel}
-                          />
-                          <StaticField
-                            label="Mes"
-                            value={formatMonthLabel(issueForm.referenceMonth)}
-                          />
-                          <StaticField
-                            label="Data de emissao"
-                            value={formatDate(issueForm.issueDate)}
-                          />
-                          <StaticField
-                            label="Vinculos encontrados"
-                            value={`${issueLinkedStudents} aluno(s) cadastrado(s)`}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
-                        <p className="text-sm font-medium">Regra aplicada</p>
-                        <p className="mt-3 text-sm text-muted-foreground">
-                          {selectedTemplate
-                            ? `${formatCurrency(selectedTemplate.amountCents)} - vencimento no dia ${selectedTemplate.dueDay} - ${billingRecurrenceLabels[selectedTemplate.recurrence]}`
-                            : "Quando varios grupos forem emitidos juntos, cada aluno herda o valor e o vencimento do proprio grupo."}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="text-sm text-muted-foreground">
-                        Alunos sem grupo ativo ou com boleto ja emitido para o
-                        mesmo mes serao ignorados automaticamente.
-                      </p>
-
-                      <Button
-                        type="button"
-                        onClick={() => void handleIssueCharges()}
-                        disabled={issuing || templateOptions.length === 0}
-                        className="rounded-2xl bg-[#ff5c00] text-white hover:bg-[#e65300]"
-                      >
-                        {issuing ? (
-                          <LoaderCircle className="mr-2 size-4 animate-spin" />
-                        ) : (
-                          <SendHorizontal className="mr-2 size-4" />
-                        )}
-                        {issuing ? "Emitindo..." : "Emitir lote"}
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
+            <BulkIssuePanel
+              gateway={overview.gateway}
+              templates={templateOptions}
+              onChanged={() => void handleRefreshAll()}
+              onOpenCharge={setDetailChargeId}
+            />
           )}
 
           {activeTab === "charges" && (

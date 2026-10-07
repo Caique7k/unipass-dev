@@ -29,6 +29,7 @@ import {
   BillingAuditAction,
   BillingAuditService,
 } from './billing-audit.service';
+import { refreshBillingBatch } from './billing-batch-progress';
 import {
   billingChargeRelations,
   mapBillingCharge,
@@ -51,7 +52,8 @@ import { BillingWebhookService } from './billing-webhook.service';
 import { IssueSingleChargeDto } from './dto/issue-single-charge.dto';
 
 export type BillingIssuer = {
-  id: string;
+  // null: ação do sistema (worker do lote cujo autor foi removido).
+  id: string | null;
   companyId: string | null;
   ip?: string | null;
 };
@@ -63,7 +65,24 @@ export type BillingReader = {
 };
 
 /** Resultado de emitir/reenviar: a cobrança como está agora no UniPass. */
-export type IssueOutcome = 'ISSUED' | 'FAILED';
+/** RETRY: falha passageira no Asaas no lote; a fila do worker tenta de novo. */
+export type IssueOutcome = 'ISSUED' | 'FAILED' | 'RETRY';
+
+export type SendToAsaasOptions = {
+  /**
+   * O que fazer com falha passageira do Asaas (429, 5xx, timeout, rede).
+   * FAILED (padrão, emissão individual): o admin vê e clica em "tentar de
+   * novo". DRAFT (lote): a cobrança continua pendente e a fila repete.
+   */
+  retryableAs?: 'FAILED' | 'DRAFT';
+};
+
+const RETRYABLE_ASAAS_ERRORS = new Set([
+  'rate_limited',
+  'unavailable',
+  'timeout',
+  'network',
+]);
 
 // Envio travado há mais que isso é considerado abandonado (processo caiu no
 // meio): outra tentativa pode assumir.
@@ -248,7 +267,9 @@ export class BillingIssuanceService {
       );
     }
 
-    return this.sendToAsaas(actor, companyId, chargeId);
+    const result = await this.sendToAsaas(actor, companyId, chargeId);
+    await this.refreshBatchOf(charge.batchId);
+    return result;
   }
 
   async cancel(actor: BillingIssuer, chargeId: string) {
@@ -294,6 +315,7 @@ export class BillingIssuanceService {
       metadata: { gateway: charge.gateway, previousStatus: charge.status },
     });
 
+    await this.refreshBatchOf(charge.batchId);
     return this.result(companyId, charge.id, null);
   }
 
@@ -319,10 +341,11 @@ export class BillingIssuanceService {
 
   // ---------------------------------------------------------------- Asaas
 
-  private async sendToAsaas(
+  async sendToAsaas(
     actor: BillingIssuer,
     companyId: string,
     chargeId: string,
+    options: SendToAsaasOptions = {},
   ) {
     const { client, environment } =
       await this.gateway.getIssuingClient(companyId);
@@ -462,6 +485,24 @@ export class BillingIssuanceService {
     } catch (error) {
       const message = this.failureMessage(error, environment);
       this.logFailure('sendToAsaas', error);
+
+      const retryLater =
+        options.retryableAs === 'DRAFT' &&
+        error instanceof AsaasApiError &&
+        RETRYABLE_ASAAS_ERRORS.has(error.kind);
+
+      if (retryLater) {
+        await this.prisma.billingCharge.update({
+          where: { id: chargeId },
+          data: {
+            status: BillingChargeStatus.DRAFT,
+            gatewayError: `Falha temporária no Asaas, nova tentativa automática em instantes. ${message}`,
+            gatewaySyncStartedAt: null,
+          },
+        });
+
+        return this.result(companyId, chargeId, 'RETRY', message);
+      }
 
       await this.prisma.billingCharge.update({
         where: { id: chargeId },
@@ -748,7 +789,7 @@ export class BillingIssuanceService {
 
   // Sem pagador cadastrado (gateway próprio), o pagador padrão é o aluno —
   // o mesmo que a emissão em lote faz.
-  private async createDefaultPayer(companyId: string, studentId: string) {
+  async createDefaultPayer(companyId: string, studentId: string) {
     const student = await this.prisma.student.findFirstOrThrow({
       where: { id: studentId, companyId },
       select: { name: true, email: true, phone: true },
@@ -776,6 +817,7 @@ export class BillingIssuanceService {
         gatewayChargeId: true,
         externalReference: true,
         gatewaySyncStartedAt: true,
+        batchId: true,
       },
     });
 
@@ -784,6 +826,13 @@ export class BillingIssuanceService {
     }
 
     return charge;
+  }
+
+  // Cobrança de lote reenviada ou cancelada à mão: o lote se recalcula.
+  private async refreshBatchOf(batchId: string | null) {
+    if (batchId) {
+      await refreshBillingBatch(this.prisma, this.audit, batchId);
+    }
   }
 
   private async result(

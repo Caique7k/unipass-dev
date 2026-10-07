@@ -3,6 +3,8 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
 import { AsaasClientFactory } from './asaas/asaas-client.factory';
 import { BillingAuditService } from './billing-audit.service';
+import { BillingBatchesController } from './billing-batches.controller';
+import { BillingBatchesService } from './billing-batches.service';
 import { BillingGatewayController } from './billing-gateway.controller';
 import { BillingGatewayService } from './billing-gateway.service';
 import { BillingIssuanceService } from './billing-issuance.service';
@@ -18,6 +20,7 @@ import { BillingWebhookService } from './billing-webhook.service';
     BillingController,
     BillingTemplatesController,
     BillingGatewayController,
+    BillingBatchesController,
   ],
   providers: [
     BillingService,
@@ -25,9 +28,10 @@ import { BillingWebhookService } from './billing-webhook.service';
     BillingTemplatesService,
     BillingGatewayService,
     BillingIssuanceService,
+    BillingBatchesService,
     BillingAuditService,
     AsaasClientFactory,
   ],
-  exports: [BillingWebhookService],
+  exports: [BillingWebhookService, BillingBatchesService],
 })
 export class BillingModule {}
