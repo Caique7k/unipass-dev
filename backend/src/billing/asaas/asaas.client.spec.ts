@@ -163,6 +163,105 @@ describe('AsaasClient', () => {
     ).rejects.toMatchObject({ kind: 'network', status: null });
   });
 
+  it('cria cliente e cobrança BOLETO com os campos da API, sem CPF no log', async () => {
+    const { fetch, calls } = fakeFetch((call) =>
+      call.url.endsWith('/customers')
+        ? json(200, { id: 'cus_1' })
+        : json(200, {
+            id: 'pay_1',
+            status: 'PENDING',
+            bankSlipUrl: 'https://sandbox.asaas.com/b/pdf/pay_1',
+            invoiceUrl: 'https://sandbox.asaas.com/i/pay_1',
+            externalReference: 'ref-1',
+          }),
+    );
+    const client = new AsaasClient(CONFIG, API_KEY, fetch);
+
+    const customer = await client.createCustomer({
+      name: 'Responsável',
+      cpfCnpj: '52998224725',
+      externalReference: 'payer-1',
+    });
+    const payment = await client.createPayment({
+      customer: 'cus_1',
+      value: 350.5,
+      dueDate: '2026-11-10',
+      description: 'Mensalidade',
+      externalReference: 'ref-1',
+    });
+
+    expect(customer.id).toBe('cus_1');
+    expect(JSON.parse(calls[1].init.body as string)).toEqual({
+      customer: 'cus_1',
+      billingType: 'BOLETO',
+      value: 350.5,
+      dueDate: '2026-11-10',
+      description: 'Mensalidade',
+      externalReference: 'ref-1',
+    });
+    expect(payment).toMatchObject({ id: 'pay_1', status: 'PENDING' });
+    expect(logged.join('\n')).not.toContain('52998224725');
+  });
+
+  it('busca por externalReference usa a listagem e ignora cobrança removida', async () => {
+    const { fetch, calls } = fakeFetch(() =>
+      json(200, {
+        object: 'list',
+        data: [
+          { id: 'pay_old', deleted: true, externalReference: 'ref-1' },
+          { id: 'pay_ok', deleted: false, externalReference: 'ref-1' },
+        ],
+      }),
+    );
+
+    const found = await new AsaasClient(
+      CONFIG,
+      API_KEY,
+      fetch,
+    ).findPaymentByExternalReference('ref-1');
+
+    expect(calls[0].url).toBe(
+      'https://api-sandbox.asaas.com/v3/payments?externalReference=ref-1&limit=10',
+    );
+    expect(found?.id).toBe('pay_ok');
+  });
+
+  it('linha digitável, Pix e exclusão nos caminhos oficiais', async () => {
+    const { fetch, calls } = fakeFetch((call) =>
+      call.url.endsWith('/identificationField')
+        ? json(200, {
+            identificationField: '2379...',
+            nossoNumero: '123',
+            barCode: '2379',
+          })
+        : call.url.endsWith('/pixQrCode')
+          ? json(200, {
+              payload: '000201',
+              expirationDate: '2027-01-01 23:59:59',
+            })
+          : json(200, { deleted: true, id: 'pay_1' }),
+    );
+    const client = new AsaasClient(CONFIG, API_KEY, fetch);
+
+    await expect(client.getIdentificationField('pay_1')).resolves.toEqual({
+      identificationField: '2379...',
+      nossoNumero: '123',
+      barCode: '2379',
+    });
+    await expect(client.getPixQrCode('pay_1')).resolves.toEqual({
+      payload: '000201',
+      expirationDate: '2027-01-01 23:59:59',
+    });
+    await expect(client.deletePayment('pay_1')).resolves.toEqual({
+      deleted: true,
+    });
+    expect(calls.map((call) => `${call.init.method} ${call.url}`)).toEqual([
+      'GET https://api-sandbox.asaas.com/v3/payments/pay_1/identificationField',
+      'GET https://api-sandbox.asaas.com/v3/payments/pay_1/pixQrCode',
+      'DELETE https://api-sandbox.asaas.com/v3/payments/pay_1',
+    ]);
+  });
+
   it('cadastra o webhook com token, eventos e envio sequencial', async () => {
     const { fetch, calls } = fakeFetch(() => json(200, { id: 'wh_1' }));
 

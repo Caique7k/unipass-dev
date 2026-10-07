@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
-import { randomBytes } from 'node:crypto';
 import { BillingAuditService } from 'src/billing/billing-audit.service';
 import { BillingGatewayService } from 'src/billing/billing-gateway.service';
+import { BillingIssuanceService } from 'src/billing/billing-issuance.service';
 import { BillingTemplatesService } from 'src/billing/billing-templates.service';
 import { BillingWebhookService } from 'src/billing/billing-webhook.service';
 import { BillingService } from 'src/billing/billing.service';
@@ -15,6 +15,7 @@ import { StudentsService } from 'src/students/students.service';
 import { TransportService } from 'src/transport/transport.service';
 import { UsersService } from 'src/users/users.service';
 import { buildAsaasFake } from './asaas-fake';
+import { TEST_BILLING_KEY_BASE64 } from './billing-test-key';
 
 /**
  * Os services reais, com o Prisma do banco de teste (sem TestingModule).
@@ -24,10 +25,16 @@ export function buildServices(prisma: PrismaService) {
   const config = new ConfigService();
   // Chave mestra só deste processo de teste; o Asaas é falso (asaas-fake.ts).
   const billingConfig = new ConfigService({
-    BILLING_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+    BILLING_ENCRYPTION_KEY: TEST_BILLING_KEY_BASE64,
   });
   const asaas = buildAsaasFake();
   const billingAudit = new BillingAuditService(prisma);
+  const billingGateway = new BillingGatewayService(
+    prisma,
+    billingConfig,
+    asaas.factory,
+    billingAudit,
+  );
   // O BillingService só usa o webhook para montar a referência externa do
   // boleto; a fila (Redis) nunca é chamada nesses fluxos. Se for, o teste
   // quebra na hora em vez de passar escondido.
@@ -38,15 +45,17 @@ export function buildServices(prisma: PrismaService) {
   );
 
   return {
-    students: new StudentsService(prisma),
+    students: new StudentsService(prisma, billingConfig),
     users: new UsersService(prisma),
-    billing: new BillingService(prisma, billingWebhook),
+    billing: new BillingService(prisma, billingWebhook, billingConfig),
     billingTemplates: new BillingTemplatesService(prisma),
-    billingGateway: new BillingGatewayService(
+    billingGateway,
+    billingIssuance: new BillingIssuanceService(
       prisma,
       billingConfig,
-      asaas.factory,
+      billingGateway,
       billingAudit,
+      billingWebhook,
     ),
     // Webhook com fila falsa: os testes chamam o processamento direto.
     billingWebhookReceiver: new BillingWebhookService(prisma, config, {

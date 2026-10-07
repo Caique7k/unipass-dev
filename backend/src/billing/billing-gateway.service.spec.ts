@@ -80,6 +80,9 @@ function buildPrisma() {
         return Promise.resolve(state.settings);
       }),
     },
+    billingCustomer: {
+      updateMany: jest.fn(() => Promise.resolve({ count: 0 })),
+    },
     billingEventLog: {
       create: jest.fn(({ data }: { data: unknown }) => {
         state.audits.push(data);
@@ -147,7 +150,14 @@ function buildService(
     new BillingAuditService(prisma),
   );
 
-  return { service, state, asaas };
+  return {
+    service,
+    state,
+    asaas,
+    prisma: prisma as unknown as {
+      billingCustomer: { updateMany: jest.Mock };
+    },
+  };
 }
 
 describe('BillingGatewayService', () => {
@@ -202,6 +212,17 @@ describe('BillingGatewayService', () => {
       },
     });
     expect(JSON.stringify(view)).not.toContain(SANDBOX_KEY);
+  });
+
+  it('chave nova zera os ids de cliente no Asaas da empresa (são por conta)', async () => {
+    const { service, prisma } = buildService();
+
+    await service.saveCredentials(ACTOR, SANDBOX_KEY);
+
+    expect(prisma.billingCustomer.updateMany).toHaveBeenCalledWith({
+      where: { companyId: COMPANY_ID, asaasCustomerId: { not: null } },
+      data: { asaasCustomerId: null, asaasSyncedAt: null },
+    });
   });
 
   it('com chave validada e webhook configurado fica "conexão validada"', async () => {

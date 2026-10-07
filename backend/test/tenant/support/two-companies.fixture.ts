@@ -11,6 +11,8 @@ import {
 } from 'src/notifications/notification-time.util';
 import { getScheduleMetadata } from 'src/route-schedules/schedule-metadata.util';
 import { fingerprintsOf, snapshotCompany } from './company-snapshot';
+import { TEST_BILLING_KEY } from './billing-test-key';
+import { onlyDigits, protectDocument } from 'src/billing/billing-document.util';
 
 type TenantSpec = {
   /** Aparece em todo texto da empresa; o canário procura por ele. */
@@ -203,7 +205,8 @@ async function seedTenant(
       studentId: student.id,
       name: `Responsável Financeiro ${label}`,
       email: `pagador@${key}.test`,
-      document: spec.customerDocument,
+      // Como a API grava: cifrado + hash + máscara, nunca em texto puro.
+      ...protectDocument(onlyDigits(spec.customerDocument), TEST_BILLING_KEY),
       phone: '+5511900000002',
     },
   });
@@ -216,7 +219,7 @@ async function seedTenant(
       customerId: billingCustomer.id,
       recipientName: billingCustomer.name,
       recipientEmail: billingCustomer.email,
-      recipientDocument: billingCustomer.document,
+      recipientDocument: billingCustomer.documentMasked,
       description: `Mensalidade ${label} - 09/2026`,
       amountCents: billingTemplate.amountCents,
       issueDate: new Date(Date.UTC(2026, 8, 1, 12)),
