@@ -22,7 +22,9 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationPromptsModule } from './notification-prompts/notification-prompts.module';
 import { GroupsModule } from './groups/groups.module';
 import { SecurityModule } from './security/security.module';
+import { BillingDocumentBackfill } from './billing/billing-document.backfill';
 import { BillingModule } from './billing/billing.module';
+import { PrismaModule } from './prisma/prisma.module';
 import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 
 @Module({
@@ -66,8 +68,10 @@ import { PushNotificationsModule } from './push-notifications/push-notifications
     NotificationPromptsModule,
     BillingModule,
     PushNotificationsModule,
+    PrismaModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  // Só na API (o worker não sobe o AppModule): cifra CPF legado ao iniciar.
+  providers: [AppService, BillingDocumentBackfill],
 })
 export class AppModule {}

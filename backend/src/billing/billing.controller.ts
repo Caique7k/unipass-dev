@@ -4,6 +4,7 @@ import {
   HttpCode,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -15,10 +16,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { BillingIssuanceService } from './billing-issuance.service';
 import { BillingService } from './billing.service';
 import { BillingWebhookService } from './billing-webhook.service';
 import { FindBillingChargesDto } from './dto/find-billing-charges.dto';
 import { IssueBillingChargesDto } from './dto/issue-billing-charges.dto';
+import { IssueSingleChargeDto } from './dto/issue-single-charge.dto';
 import { AsaasWebhookParamsDto } from './dto/billing-gateway.dto';
 
 type AuthenticatedRequest = Request & {
@@ -39,6 +42,7 @@ export class BillingController {
   constructor(
     private readonly billingService: BillingService,
     private readonly billingWebhookService: BillingWebhookService,
+    private readonly billingIssuanceService: BillingIssuanceService,
   ) {}
 
   @Public()
@@ -110,5 +114,71 @@ export class BillingController {
     @Body() dto: IssueBillingChargesDto,
   ) {
     return this.billingService.issueCharges(req.user.companyId, dto);
+  }
+
+  /** Revisão antes de emitir: o que será cobrado e o que impede a emissão. */
+  @Post('charges/preview')
+  @HttpCode(200)
+  @Roles('ADMIN')
+  previewCharge(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: IssueSingleChargeDto,
+  ) {
+    return this.billingIssuanceService.preview(req.user.companyId, dto);
+  }
+
+  /** Emite UMA cobrança (gateway próprio: só local; Asaas: envia ao Asaas). */
+  @Post('charges')
+  @Roles('ADMIN')
+  issueCharge(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: IssueSingleChargeDto,
+  ) {
+    return this.billingIssuanceService.issue(
+      { id: req.user.id, companyId: req.user.companyId, ip: req.ip ?? null },
+      dto,
+    );
+  }
+
+  @Get('charges/:id')
+  @Roles('ADMIN', 'DRIVER', 'COORDINATOR', 'USER')
+  findCharge(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.billingIssuanceService.getCharge(
+      {
+        companyId: req.user.companyId,
+        userId: req.user.id,
+        role: req.user.role,
+      },
+      id,
+    );
+  }
+
+  @Post('charges/:id/retry')
+  @HttpCode(200)
+  @Roles('ADMIN')
+  retryCharge(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.billingIssuanceService.retry(
+      { id: req.user.id, companyId: req.user.companyId, ip: req.ip ?? null },
+      id,
+    );
+  }
+
+  @Post('charges/:id/cancel')
+  @HttpCode(200)
+  @Roles('ADMIN')
+  cancelCharge(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.billingIssuanceService.cancel(
+      { id: req.user.id, companyId: req.user.companyId, ip: req.ip ?? null },
+      id,
+    );
   }
 }

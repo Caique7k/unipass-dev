@@ -6,7 +6,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import {
   CalendarClock,
-  ExternalLink,
+  FilePlus2,
   LoaderCircle,
   RefreshCw,
   Search,
@@ -16,15 +16,13 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { PageTableSkeleton } from "@/app/dashboard/components/DashboardSkeletons";
-import type {
-  BillingGroup,
-  BillingTemplateRecurrence,
-} from "@/app/dashboard/billing-groups/types/billing-group";
+import type { BillingGroup } from "@/app/dashboard/billing-groups/types/billing-group";
 import { billingRecurrenceLabels } from "@/app/dashboard/billing-groups/types/billing-group";
 import { AccessDenied } from "@/components/AccessDenied";
 import {
   GhostButton,
   PageHeader,
+  PrimaryButton,
   StatusBadge,
 } from "@/app/dashboard/components/page-kit";
 import { useBillingGateway } from "./settings/hooks/useBillingGateway";
@@ -59,22 +57,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { UserRole } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import api from "@/services/api";
+import { ChargeDetailModal } from "./components/ChargeDetailModal";
+import { IssueChargeModal } from "./components/IssueChargeModal";
+import {
+  gatewayLabels,
+  type BillingCharge,
+  type BillingChargeStatus,
+} from "./types/charge";
 
 type AccessScope = "company" | "self";
 type BillingTab = "issue" | "charges";
-type BillingChargeStatus =
-  | "DRAFT"
-  | "SCHEDULED"
-  | "ISSUED"
-  | "SENT"
-  | "PAID"
-  | "OVERDUE"
-  | "CANCELLED"
-  | "FAILED"
-  | "REFUNDED";
 type BillingChargeStatusFilter =
   | "ALL"
   | "OPEN"
@@ -103,47 +97,6 @@ type BillingOverviewResponse = {
     helper: string;
   }>;
   charges: BillingCharge[];
-};
-
-type BillingCharge = {
-  id: string;
-  description: string;
-  amountCents: number;
-  issueDate: string;
-  dueDate: string;
-  status: BillingChargeStatus;
-  gatewayStatus: string | null;
-  paidAt: string | null;
-  bankSlipUrl: string | null;
-  gatewayInvoiceUrl: string | null;
-  externalReference: string | null;
-  recipientName: string;
-  recipientEmail: string | null;
-  isOverdue: boolean;
-  student: {
-    id: string;
-    name: string;
-    registration: string;
-  } | null;
-  customer: {
-    id: string;
-    name: string;
-    email: string | null;
-    // Mascarado pelo backend; o id do Asaas só vem para o ADMIN.
-    document: string | null;
-    asaasCustomerId?: string | null;
-  } | null;
-  template: {
-    id: string;
-    name: string;
-    recurrence: BillingTemplateRecurrence;
-  } | null;
-  ownerUser: {
-    id: string;
-    name: string;
-    email: string;
-    role: UserRole;
-  } | null;
 };
 
 type BillingChargesResponse = {
@@ -369,6 +322,8 @@ export default function BillingPage() {
     buildDefaultIssueForm,
   );
   const [issuing, setIssuing] = useState(false);
+  const [issueModalOpen, setIssueModalOpen] = useState(false);
+  const [detailChargeId, setDetailChargeId] = useState<string | null>(null);
 
   const isPlatformAdmin = user?.role === "PLATFORM_ADMIN";
   const canAccess = !!user && !isPlatformAdmin;
@@ -647,13 +602,21 @@ export default function BillingPage() {
             : "Acompanhe as cobranças vinculadas ao seu usuário."
         }
         actions={
-          <GhostButton onClick={() => void handleRefreshAll()}>
-            <RefreshCw
-              size={13}
-              className={cn(chargesFetching && "animate-spin")}
-            />
-            Atualizar
-          </GhostButton>
+          <>
+            <GhostButton onClick={() => void handleRefreshAll()}>
+              <RefreshCw
+                size={13}
+                className={cn(chargesFetching && "animate-spin")}
+              />
+              Atualizar
+            </GhostButton>
+            {canIssueCharges && (
+              <PrimaryButton onClick={() => setIssueModalOpen(true)}>
+                <FilePlus2 size={14} />
+                Emitir boleto
+              </PrimaryButton>
+            )}
+          </>
         }
       />
 
@@ -700,7 +663,20 @@ export default function BillingPage() {
               </CardHeader>
 
               <CardContent className="space-y-5">
-                {templateOptions.length === 0 && !templatesLoading ? (
+                {overview.gateway === "ASAAS" ? (
+                  <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm">
+                    A emissão em lote ainda não envia ao Asaas (chega na
+                    próxima etapa). Enquanto isso, use{" "}
+                    <button
+                      type="button"
+                      className="font-medium underline underline-offset-2"
+                      onClick={() => setIssueModalOpen(true)}
+                    >
+                      Emitir boleto
+                    </button>
+                    , um aluno por vez.
+                  </div>
+                ) : templateOptions.length === 0 && !templatesLoading ? (
                   <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-5 text-sm text-muted-foreground">
                     Cadastre grupos de boletos e vincule-os aos alunos para
                     liberar a emissao em lote.
@@ -1005,6 +981,7 @@ export default function BillingPage() {
                               <TableHead>Emissao</TableHead>
                               <TableHead>Vencimento</TableHead>
                               <TableHead>Status</TableHead>
+                              <TableHead>Gateway</TableHead>
                               <TableHead>Pagamento</TableHead>
                               <TableHead>Boleto</TableHead>
                             </TableRow>
@@ -1063,23 +1040,20 @@ export default function BillingPage() {
                                       : formatStatus(charge.status)}
                                   </span>
                                 </TableCell>
+                                <TableCell>
+                                  <span className="text-xs">
+                                    {gatewayLabels[charge.gateway]}
+                                  </span>
+                                </TableCell>
                                 <TableCell>{formatDate(charge.paidAt)}</TableCell>
                                 <TableCell>
-                                  {charge.bankSlipUrl ? (
-                                    <a
-                                      href={charge.bankSlipUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-xs font-medium hover:bg-muted"
-                                    >
-                                      Abrir
-                                      <ExternalLink className="size-3.5" />
-                                    </a>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">
-                                      Pendente
-                                    </span>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetailChargeId(charge.id)}
+                                    className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-xs font-medium hover:bg-muted"
+                                  >
+                                    Detalhes
+                                  </button>
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -1174,6 +1148,27 @@ export default function BillingPage() {
               </Card>
             </div>
           )}
+
+      {canIssueCharges && (
+        <IssueChargeModal
+          open={issueModalOpen}
+          onOpenChange={setIssueModalOpen}
+          templates={templateOptions}
+          onIssued={() => void handleRefreshAll()}
+          onOpenCharge={(chargeId) => {
+            setIssueModalOpen(false);
+            setDetailChargeId(chargeId);
+          }}
+        />
+      )}
+      <ChargeDetailModal
+        chargeId={detailChargeId}
+        canManage={canIssueCharges}
+        onOpenChange={(open) => {
+          if (!open) setDetailChargeId(null);
+        }}
+        onChanged={() => void handleRefreshAll()}
+      />
     </div>
   );
 }

@@ -581,9 +581,12 @@ async function main() {
     });
   }
 
+  // CPFs de teste válidos (dígitos verificadores certos). O seed grava no campo
+  // legado `document`; ao subir, a API cifra e zera esse campo
+  // (BillingDocumentBackfill).
   const customerRows = [
-    { id: ids.customers.ana, studentId: ids.students.ana, name: 'Responsável por Ana Souza', email: 'responsavel.ana@example.com', document: '12345678901', phone: '+5511977770001', asaasCustomerId: 'seed_customer_ana' },
-    { id: ids.customers.bruno, studentId: ids.students.bruno, name: 'Responsável por Bruno Oliveira', email: 'responsavel.bruno@example.com', document: '23456789012', phone: '+5511977770002', asaasCustomerId: 'seed_customer_bruno' },
+    { id: ids.customers.ana, studentId: ids.students.ana, name: 'Responsável por Ana Souza', email: 'responsavel.ana@example.com', document: '52998224725', phone: '+5511977770001' },
+    { id: ids.customers.bruno, studentId: ids.students.bruno, name: 'Responsável por Bruno Oliveira', email: 'responsavel.bruno@example.com', document: '11144477735', phone: '+5511977770002' },
   ];
   for (const customer of customerRows) {
     await prisma.billingCustomer.upsert({
@@ -610,7 +613,8 @@ async function main() {
         customerId: index % 2 === 0 ? ids.customers.ana : ids.customers.bruno,
         recipientName: index % 2 === 0 ? 'Responsável por Ana Souza' : 'Responsável por Bruno Oliveira',
         recipientEmail: index % 2 === 0 ? 'responsavel.ana@example.com' : 'responsavel.bruno@example.com',
-        recipientDocument: index % 2 === 0 ? '12345678901' : '23456789012',
+        // Só a versão mascarada (o CPF fica cifrado no pagador).
+        recipientDocument: index % 2 === 0 ? '***.***.*47-25' : '***.***.*77-35',
         description: `Mensalidade de desenvolvimento - ${status}`,
         amountCents: 35000 + index * 1000,
         issueDate: daysAgo(10),

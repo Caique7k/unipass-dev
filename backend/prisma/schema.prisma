@@ -116,22 +116,24 @@ model Company {
 }
 
 model User {
-  id                  String                 @id @default(uuid())
-  name                String
-  email               String                 @unique
-  password            String
-  role                UserRole
-  active              Boolean                @default(true)
-  studentId           String?                @unique
-  companyId           String?
-  student             Student?               @relation(fields: [studentId], references: [id])
-  company             Company?               @relation(fields: [companyId], references: [id])
-  confirmations       ScheduleConfirmation[]
-  notificationPrompts NotificationPrompt[]
-  pushSubscriptions   PushSubscription[]
-  ownedBillingCharges BillingCharge[]        @relation("BillingChargeOwner")
-  billingAuditLogs    BillingEventLog[]      @relation("BillingAuditActor")
-  rfidCaptures        RfidCaptureSession[]
+  id                      String                 @id @default(uuid())
+  name                    String
+  email                   String                 @unique
+  password                String
+  role                    UserRole
+  active                  Boolean                @default(true)
+  studentId               String?                @unique
+  companyId               String?
+  student                 Student?               @relation(fields: [studentId], references: [id])
+  company                 Company?               @relation(fields: [companyId], references: [id])
+  confirmations           ScheduleConfirmation[]
+  notificationPrompts     NotificationPrompt[]
+  pushSubscriptions       PushSubscription[]
+  ownedBillingCharges     BillingCharge[]        @relation("BillingChargeOwner")
+  billingAuditLogs        BillingEventLog[]      @relation("BillingAuditActor")
+  issuedBillingCharges    BillingCharge[]        @relation("BillingChargeIssuedBy")
+  cancelledBillingCharges BillingCharge[]        @relation("BillingChargeCancelledBy")
+  rfidCaptures            RfidCaptureSession[]
 
   createdAt DateTime @default(now())
 
@@ -534,23 +536,34 @@ model BillingTemplate {
 }
 
 model BillingCustomer {
-  id              String            @id @default(uuid())
-  companyId       String
-  company         Company           @relation(fields: [companyId], references: [id])
-  studentId       String?
-  student         Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  name            String
-  email           String?
-  document        String?
-  phone           String?
-  asaasCustomerId String?           @unique
-  charges         BillingCharge[]
-  eventLogs       BillingEventLog[]
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  id                String            @id @default(uuid())
+  companyId         String
+  company           Company           @relation(fields: [companyId], references: [id])
+  studentId         String?
+  student           Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  name              String
+  email             String?
+  // LEGADO: CPF/CNPJ em texto puro. Não é mais escrito; o backfill
+  // (billing-document.backfill.ts) cifra o que sobrou e zera este campo.
+  document          String?
+  // CPF/CNPJ do pagador: cifrado (AES-256-GCM), hash para busca exata e
+  // versão mascarada para a tela. O documento completo nunca sai da API.
+  documentEncrypted String?
+  documentHash      String?
+  documentMasked    String?
+  phone             String?
+  asaasCustomerId   String?           @unique
+  // Quando o cadastro foi enviado ao Asaas pela última vez; null depois de
+  // editar o pagador (força atualizar o cliente no Asaas na próxima emissão).
+  asaasSyncedAt     DateTime?
+  charges           BillingCharge[]
+  eventLogs         BillingEventLog[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   @@index([companyId, createdAt])
   @@index([studentId])
+  @@index([companyId, documentHash])
 }
 
 model BillingCharge {
@@ -567,6 +580,7 @@ model BillingCharge {
   customer               BillingCustomer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
   recipientName          String
   recipientEmail         String?
+  // Só a versão mascarada do documento (cópia do momento da emissão).
   recipientDocument      String?
   description            String
   amountCents            Int
@@ -581,6 +595,29 @@ model BillingCharge {
   gatewayStatusUpdatedAt DateTime?
   paidAt                 DateTime?
   lastNotifiedAt         DateTime?
+  // Por onde a cobrança foi emitida e o mês que ela cobra ("YYYY-MM").
+  // Atenção: há um índice único PARCIAL em SQL (migração
+  // 20261006180000_billing_asaas_issuance) em
+  // (companyId, studentId, templateId, referenceMonth) para status <> CANCELLED.
+  // O Prisma não declara índice parcial: um "prisma migrate dev" futuro vai
+  // propor DROP desse índice — não aceite.
+  gateway                BillingGatewayMode  @default(EXTERNAL)
+  referenceMonth         String?
+  identificationField    String?
+  barCode                String?
+  nossoNumero            String?
+  pixPayload             String?
+  pixExpiresAt           DateTime?
+  // Mensagem já traduzida da última falha no gateway (nunca a resposta crua).
+  gatewayError           String?
+  gatewayAttempts        Int                 @default(0)
+  // Trava de envio ao gateway: evita duas tentativas simultâneas.
+  gatewaySyncStartedAt   DateTime?
+  issuedByUserId         String?
+  issuedByUser           User?               @relation("BillingChargeIssuedBy", fields: [issuedByUserId], references: [id], onDelete: SetNull)
+  cancelledAt            DateTime?
+  cancelledByUserId      String?
+  cancelledByUser        User?               @relation("BillingChargeCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
   eventLogs              BillingEventLog[]

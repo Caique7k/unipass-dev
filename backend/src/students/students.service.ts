@@ -2,8 +2,19 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { BillingTargetScope, Prisma } from '@prisma/client';
+import {
+  BillingEncryptionKeyError,
+  parseEncryptionKey,
+} from '../billing/billing-crypto.util';
+import {
+  InvalidDocumentError,
+  normalizeCpfCnpj,
+  protectDocument,
+} from '../billing/billing-document.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { StudentBillingCustomerDto } from './dto/student-billing-customer.dto';
@@ -34,11 +45,12 @@ const studentDetailsInclude = {
     },
   },
   billingCustomers: {
+    // Documento só mascarado: o CPF/CNPJ completo nunca sai da API.
     select: {
       id: true,
       name: true,
       email: true,
-      document: true,
+      documentMasked: true,
       phone: true,
       createdAt: true,
       updatedAt: true,
@@ -64,23 +76,19 @@ type StudentWithDetails = Prisma.StudentGetPayload<{
 }>;
 
 type StudentResponse = Omit<StudentWithDetails, 'billingCustomers'> & {
-  billingCustomer: StudentWithDetails['billingCustomers'][number] | null;
+  billingCustomer:
+    | (StudentWithDetails['billingCustomers'][number] & {
+        hasDocument: boolean;
+      })
+    | null;
 };
-
-type StudentBillingCustomerInput =
-  | StudentBillingCustomerDto
-  | {
-      name?: string | null;
-      email?: string | null;
-      document?: string | null;
-      phone?: string | null;
-    }
-  | null
-  | undefined;
 
 @Injectable()
 export class StudentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async findAll({
     companyId,
@@ -308,7 +316,7 @@ export class StudentsService {
           studentName: nextName,
           studentEmail: nextEmail,
           studentPhone: nextPhone,
-          billingCustomer: dto.billingCustomer ?? student.billingCustomer,
+          billingCustomer: dto.billingCustomer,
         });
 
         const updatedStudent = await tx.student.findUniqueOrThrow({
@@ -409,9 +417,13 @@ export class StudentsService {
   private mapStudent(student: StudentWithDetails): StudentResponse {
     const { billingCustomers, ...studentData } = student;
 
+    const customer = billingCustomers[0];
+
     return {
       ...studentData,
-      billingCustomer: billingCustomers[0] ?? null,
+      billingCustomer: customer
+        ? { ...customer, hasDocument: !!customer.documentMasked }
+        : null,
     };
   }
 
@@ -596,6 +608,14 @@ export class StudentsService {
     return `${normalized}${expectedSuffix}`;
   }
 
+  /**
+   * Pagador (responsável financeiro) do aluno. Sem dados informados, o
+   * pagador padrão é o próprio aluno (nome, e-mail e telefone dele).
+   * Documento: omitido = mantém o atual, vazio = apaga, preenchido = valida,
+   * cifra e guarda hash + máscara (o texto puro nunca é gravado).
+   * Mudou nome, e-mail, telefone ou documento: o cliente no Asaas precisa
+   * ser atualizado na próxima emissão (asaasSyncedAt = null).
+   */
   private async syncBillingCustomer(
     tx: Prisma.TransactionClient,
     params: {
@@ -604,7 +624,7 @@ export class StudentsService {
       studentName: string;
       studentEmail: string | null;
       studentPhone: string | null;
-      billingCustomer?: StudentBillingCustomerInput;
+      billingCustomer?: StudentBillingCustomerDto;
     },
   ) {
     const existingCustomer = await tx.billingCustomer.findFirst({
@@ -615,35 +635,59 @@ export class StudentsService {
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
       select: {
         id: true,
+        name: true,
+        email: true,
+        phone: true,
+        documentHash: true,
       },
     });
 
-    const customerData = this.buildBillingCustomerData(params);
+    if (existingCustomer && params.billingCustomer === undefined) {
+      return;
+    }
 
-    if (existingCustomer) {
-      await tx.billingCustomer.update({
-        where: {
-          id: existingCustomer.id,
+    const contact = this.buildBillingCustomerContact(params);
+    const documentData = this.buildBillingCustomerDocument(
+      params.billingCustomer?.document,
+    );
+
+    if (!existingCustomer) {
+      await tx.billingCustomer.create({
+        data: {
+          companyId: params.companyId,
+          studentId: params.studentId,
+          ...contact,
+          ...(documentData ?? {}),
         },
-        data: customerData,
       });
       return;
     }
 
-    await tx.billingCustomer.create({
+    const changed =
+      existingCustomer.name !== contact.name ||
+      existingCustomer.email !== contact.email ||
+      existingCustomer.phone !== contact.phone ||
+      (documentData !== undefined &&
+        existingCustomer.documentHash !== documentData.documentHash);
+
+    await tx.billingCustomer.update({
+      where: {
+        id: existingCustomer.id,
+      },
       data: {
-        companyId: params.companyId,
-        studentId: params.studentId,
-        ...customerData,
+        ...contact,
+        ...(documentData ?? {}),
+        document: null,
+        ...(changed ? { asaasSyncedAt: null } : {}),
       },
     });
   }
 
-  private buildBillingCustomerData(params: {
+  private buildBillingCustomerContact(params: {
     studentName: string;
     studentEmail: string | null;
     studentPhone: string | null;
-    billingCustomer?: StudentBillingCustomerInput;
+    billingCustomer?: StudentBillingCustomerDto;
   }) {
     const providedName = this.normalizeOptionalString(
       params.billingCustomer?.name,
@@ -651,11 +695,11 @@ export class StudentsService {
     const providedEmail = this.normalizeOptionalEmail(
       params.billingCustomer?.email,
     );
-    const providedDocument = this.normalizeOptionalString(
-      params.billingCustomer?.document,
-    );
     const providedPhone = this.normalizeOptionalString(
       params.billingCustomer?.phone,
+    );
+    const providedDocument = this.normalizeOptionalString(
+      params.billingCustomer?.document,
     );
 
     if (!providedName && (providedEmail || providedDocument || providedPhone)) {
@@ -667,9 +711,53 @@ export class StudentsService {
     return {
       name: providedName ?? params.studentName,
       email: providedEmail ?? params.studentEmail ?? null,
-      document: providedDocument,
       phone: providedPhone ?? params.studentPhone ?? null,
     };
+  }
+
+  /** undefined = não mexe; null nos campos = apaga; senão, protegido. */
+  private buildBillingCustomerDocument(document: string | undefined) {
+    if (document === undefined) {
+      return undefined;
+    }
+
+    const trimmed = document.trim();
+
+    if (!trimmed) {
+      return {
+        documentEncrypted: null,
+        documentHash: null,
+        documentMasked: null,
+      };
+    }
+
+    let digits: string;
+    try {
+      digits = normalizeCpfCnpj(trimmed);
+    } catch (error) {
+      if (error instanceof InvalidDocumentError) {
+        throw new BadRequestException(
+          `Responsável financeiro: ${error.message}`,
+        );
+      }
+      throw error;
+    }
+
+    let masterKey: Buffer;
+    try {
+      masterKey = parseEncryptionKey(
+        this.configService.get<string>('BILLING_ENCRYPTION_KEY'),
+      );
+    } catch (error) {
+      if (error instanceof BillingEncryptionKeyError) {
+        throw new ServiceUnavailableException(
+          'O servidor não está pronto para guardar CPF/CNPJ com segurança. Fale com o suporte do UniPass.',
+        );
+      }
+      throw error;
+    }
+
+    return protectDocument(digits, masterKey);
   }
 
   private normalizeOptionalEmail(value?: string | null) {

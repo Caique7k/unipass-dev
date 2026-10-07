@@ -20,6 +20,41 @@ export type AsaasWebhookInput = {
   events: readonly string[];
 };
 
+/**
+ * Cliente (pagador) no Asaas. Só o necessário para emitir: sem telefone e
+ * sem endereço (não são obrigatórios na API).
+ */
+export type AsaasCustomerInput = {
+  name: string;
+  cpfCnpj: string;
+  email?: string;
+  externalReference: string;
+};
+
+export type AsaasCustomer = {
+  id: string | null;
+  deleted: boolean;
+};
+
+export type AsaasPaymentInput = {
+  customer: string;
+  value: number;
+  /** YYYY-MM-DD */
+  dueDate: string;
+  description: string;
+  externalReference: string;
+};
+
+export type AsaasPayment = {
+  id: string | null;
+  status: string | null;
+  invoiceUrl: string | null;
+  bankSlipUrl: string | null;
+  nossoNumero: string | null;
+  externalReference: string | null;
+  deleted: boolean;
+};
+
 const DEFAULT_TIMEOUT_MS = 15_000;
 const USER_AGENT = 'UniPass/1.0 (NestJS)';
 
@@ -80,6 +115,118 @@ export class AsaasClient {
     );
 
     return { id: readString(body.id) ?? webhookId };
+  }
+
+  /** GET /customers?externalReference= — recupera cliente já criado. */
+  async findCustomerByExternalReference(externalReference: string) {
+    const body = await this.request(
+      'findCustomer',
+      'GET',
+      `/customers?${new URLSearchParams({ externalReference, limit: '1' })}`,
+    );
+
+    return readList(body).map(toCustomer)[0] ?? null;
+  }
+
+  /** POST /customers — name e cpfCnpj são obrigatórios. */
+  async createCustomer(input: AsaasCustomerInput) {
+    return toCustomer(
+      await this.request('createCustomer', 'POST', '/customers', input),
+    );
+  }
+
+  /** PUT /customers/{id} — o Asaas pede só os campos que mudam. */
+  async updateCustomer(customerId: string, input: AsaasCustomerInput) {
+    return toCustomer(
+      await this.request(
+        'updateCustomer',
+        'PUT',
+        `/customers/${encodeURIComponent(customerId)}`,
+        input,
+      ),
+    );
+  }
+
+  /** GET /payments?externalReference= — recupera cobrança já criada. */
+  async findPaymentByExternalReference(externalReference: string) {
+    const body = await this.request(
+      'findPayment',
+      'GET',
+      `/payments?${new URLSearchParams({ externalReference, limit: '10' })}`,
+    );
+
+    return (
+      readList(body)
+        .map(toPayment)
+        .find((payment) => !payment.deleted) ?? null
+    );
+  }
+
+  /** POST /payments — cria a cobrança (BOLETO). */
+  async createPayment(input: AsaasPaymentInput) {
+    return toPayment(
+      await this.request('createPayment', 'POST', '/payments', {
+        customer: input.customer,
+        billingType: 'BOLETO',
+        value: input.value,
+        dueDate: input.dueDate,
+        description: input.description,
+        externalReference: input.externalReference,
+      }),
+    );
+  }
+
+  async getPayment(paymentId: string) {
+    return toPayment(
+      await this.request(
+        'getPayment',
+        'GET',
+        `/payments/${encodeURIComponent(paymentId)}`,
+      ),
+    );
+  }
+
+  /** GET /payments/{id}/identificationField — linha digitável do boleto. */
+  async getIdentificationField(paymentId: string) {
+    const body = await this.request(
+      'identificationField',
+      'GET',
+      `/payments/${encodeURIComponent(paymentId)}/identificationField`,
+    );
+
+    return {
+      identificationField: readString(body.identificationField),
+      nossoNumero: readString(body.nossoNumero),
+      barCode: readString(body.barCode),
+    };
+  }
+
+  /**
+   * GET /payments/{id}/pixQrCode — vale para BOLETO quando o Pix está
+   * disponível na conta (no fluxo regular, com chave Pix cadastrada).
+   */
+  async getPixQrCode(paymentId: string) {
+    const body = await this.request(
+      'pixQrCode',
+      'GET',
+      `/payments/${encodeURIComponent(paymentId)}/pixQrCode`,
+    );
+
+    return {
+      payload: readString(body.payload),
+      expirationDate: readString(body.expirationDate),
+    };
+  }
+
+  /** DELETE /payments/{id} — remove a cobrança no Asaas. */
+  async deletePayment(paymentId: string) {
+    const body = await this.request(
+      'deletePayment',
+      'DELETE',
+      `/payments/${encodeURIComponent(paymentId)}`,
+    );
+
+    return { deleted: body.deleted === true };
   }
 
   private webhookBody(input: AsaasWebhookInput) {
@@ -191,6 +338,32 @@ function readErrorDetails(
       code: readString(item.code),
       description: readString(item.description),
     }));
+}
+
+// Listagens seguem o padrão { object: 'list', data: [...] }.
+function readList(body: Record<string, unknown>) {
+  return Array.isArray(body.data)
+    ? body.data.filter(
+        (item): item is Record<string, unknown> =>
+          !!item && typeof item === 'object',
+      )
+    : [];
+}
+
+function toCustomer(body: Record<string, unknown>): AsaasCustomer {
+  return { id: readString(body.id), deleted: body.deleted === true };
+}
+
+function toPayment(body: Record<string, unknown>): AsaasPayment {
+  return {
+    id: readString(body.id),
+    status: readString(body.status),
+    invoiceUrl: readString(body.invoiceUrl),
+    bankSlipUrl: readString(body.bankSlipUrl),
+    nossoNumero: readString(body.nossoNumero),
+    externalReference: readString(body.externalReference),
+    deleted: body.deleted === true,
+  };
 }
 
 function readRetryAfter(value: string | null) {

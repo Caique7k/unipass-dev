@@ -11,6 +11,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { formatCpfCnpj, validateCpfCnpj } from "@/lib/document";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { buildApiUrl } from "@/services/api";
@@ -63,7 +64,9 @@ type Student = {
     id?: string;
     name?: string | null;
     email?: string | null;
-    document?: string | null;
+    // A API só devolve o documento mascarado; o completo nunca chega aqui.
+    documentMasked?: string | null;
+    hasDocument?: boolean;
     phone?: string | null;
   } | null;
   routeIds?: string[];
@@ -86,7 +89,8 @@ type Errors = Partial<
     | "emailLocalPart"
     | "phone"
     | "billingCustomerName"
-    | "billingCustomerEmail",
+    | "billingCustomerEmail"
+    | "billingCustomerDocument",
     string
   >
 >;
@@ -139,7 +143,7 @@ function deriveBillingCustomerForm(student?: Student | null): BillingCustomerFor
     customer.email?.trim().toLowerCase() === student.email.trim().toLowerCase();
   const matchesStudentPhone =
     !!student?.phone && customer.phone?.trim() === student.phone.trim();
-  const hasDocument = !!customer.document?.trim();
+  const hasDocument = !!customer.hasDocument;
 
   if (
     matchesStudentName &&
@@ -150,10 +154,11 @@ function deriveBillingCustomerForm(student?: Student | null): BillingCustomerFor
     return emptyBillingCustomer;
   }
 
+  // O campo de documento começa vazio: ele só serve para digitar um novo.
   return {
     name: customer.name ?? "",
     email: customer.email ?? "",
-    document: customer.document ?? "",
+    document: "",
     phone: customer.phone ?? "",
   };
 }
@@ -193,6 +198,14 @@ export function StudentModal({
   const [emailLocalPart, setEmailLocalPart] = useState("");
   const [billingCustomerForm, setBillingCustomerForm] =
     useState<BillingCustomerForm>(emptyBillingCustomer);
+  // Documento já salvo: "keep" mantém, "edit" troca pelo digitado, "clear"
+  // apaga. Sem documento salvo, digitar é sempre "edit".
+  const [documentMode, setDocumentMode] = useState<"keep" | "edit" | "clear">(
+    "keep",
+  );
+  const savedDocumentMasked = student?.billingCustomer?.hasDocument
+    ? (student.billingCustomer.documentMasked ?? null)
+    : null;
   const [errors, setErrors] = useState<Errors>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isLinking, setIsLinking] = useState(false);
@@ -333,6 +346,7 @@ export function StudentModal({
     );
     setEmailLocalPart(extractEmailLocalPart(student?.email));
     setBillingCustomerForm(deriveBillingCustomerForm(student));
+    setDocumentMode("keep");
     setErrors({});
     setServerError("");
     setIsLinking(false);
@@ -357,7 +371,10 @@ export function StudentModal({
     field: keyof BillingCustomerForm,
     value: string,
   ) => {
-    setBillingCustomerForm((prev) => ({ ...prev, [field]: value }));
+    setBillingCustomerForm((prev) => ({
+      ...prev,
+      [field]: field === "document" ? formatCpfCnpj(value) : value,
+    }));
   };
 
   const validate = (): boolean => {
@@ -406,6 +423,13 @@ export function StudentModal({
       ) {
         newErrors.billingCustomerEmail = "Informe um e-mail valido.";
       }
+
+      if (billingCustomerForm.document.trim()) {
+        const documentError = validateCpfCnpj(billingCustomerForm.document);
+        if (documentError) {
+          newErrors.billingCustomerDocument = documentError;
+        }
+      }
     }
 
     setErrors(newErrors);
@@ -425,8 +449,13 @@ export function StudentModal({
       ? {
           name: billingCustomerForm.name.trim(),
           email: billingCustomerForm.email.trim(),
-          document: billingCustomerForm.document.trim(),
           phone: billingCustomerForm.phone.trim(),
+          // Sem "document", o backend mantém o que já está salvo.
+          ...(documentMode === "clear"
+            ? { document: "" }
+            : billingCustomerForm.document.trim()
+              ? { document: billingCustomerForm.document.trim() }
+              : {}),
         }
       : undefined,
   });
@@ -1060,7 +1089,8 @@ export function StudentModal({
                   </p>
                   <p className="text-sm text-muted-foreground">
                     Se voce deixar em branco, o proprio aluno sera usado como
-                    pagador padrao na geracao dos boletos.
+                    pagador padrao na geracao dos boletos. Para emitir pelo
+                    Asaas, o CPF/CNPJ do responsavel e obrigatorio.
                   </p>
                 </div>
 
@@ -1105,14 +1135,66 @@ export function StudentModal({
                     <Label className="text-sm font-medium">
                       CPF/CNPJ do responsavel
                     </Label>
-                    <Input
-                      value={billingCustomerForm.document}
-                      onChange={(e) =>
-                        handleBillingCustomerChange("document", e.target.value)
-                      }
-                      className="h-11 rounded-xl border-border/70 bg-background px-3"
-                      placeholder="Somente numeros"
-                    />
+                    {savedDocumentMasked && documentMode !== "edit" ? (
+                      <div className="flex h-11 items-center justify-between gap-2 rounded-xl border border-border/70 bg-background px-3 text-sm">
+                        <span
+                          className={cn(
+                            "font-mono",
+                            documentMode === "clear" &&
+                              "text-muted-foreground line-through",
+                          )}
+                        >
+                          {savedDocumentMasked}
+                        </span>
+                        <span className="flex gap-3 text-xs">
+                          {documentMode === "clear" ? (
+                            <button
+                              type="button"
+                              className="underline-offset-2 hover:underline"
+                              onClick={() => setDocumentMode("keep")}
+                            >
+                              Desfazer
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="underline-offset-2 hover:underline"
+                                onClick={() => setDocumentMode("edit")}
+                              >
+                                Trocar
+                              </button>
+                              <button
+                                type="button"
+                                className="text-red-500 underline-offset-2 hover:underline"
+                                onClick={() => setDocumentMode("clear")}
+                              >
+                                Remover
+                              </button>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    ) : (
+                      <Input
+                        value={billingCustomerForm.document}
+                        onChange={(e) =>
+                          handleBillingCustomerChange("document", e.target.value)
+                        }
+                        inputMode="numeric"
+                        autoComplete="off"
+                        className={cn(
+                          "h-11 rounded-xl border-border/70 bg-background px-3",
+                          errors.billingCustomerDocument && "border-red-500",
+                        )}
+                        placeholder="000.000.000-00"
+                      />
+                    )}
+                    {renderError("billingCustomerDocument")}
+                    <p className="text-xs text-muted-foreground">
+                      Guardado criptografado; depois de salvo, aparece só o
+                      final.
+                    </p>
                   </div>
 
                   <div className="space-y-2">

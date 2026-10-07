@@ -5,6 +5,7 @@ import { AsaasClientFactory } from './asaas/asaas-client.factory';
 import { BillingAuditService } from './billing-audit.service';
 import { BillingGatewayController } from './billing-gateway.controller';
 import { BillingGatewayService } from './billing-gateway.service';
+import { BillingIssuanceService } from './billing-issuance.service';
 import { BillingTemplatesController } from './billing-templates.controller';
 import { BillingTemplatesService } from './billing-templates.service';
 import { BillingController } from './billing.controller';
@@ -23,6 +24,7 @@ import { BillingWebhookService } from './billing-webhook.service';
     BillingWebhookService,
     BillingTemplatesService,
     BillingGatewayService,
+    BillingIssuanceService,
     BillingAuditService,
     AsaasClientFactory,
   ],

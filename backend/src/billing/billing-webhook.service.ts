@@ -1016,6 +1016,37 @@ export class BillingWebhookService {
       updateData.paidAt = nextPaidAt;
     }
 
+    // Valor ou vencimento alterados no Asaas: o UniPass acompanha, e a linha
+    // digitável/Pix gravados deixam de valer (o link do boleto continua
+    // certo, porque o Asaas o mantém atualizado).
+    if (params.event === 'PAYMENT_UPDATED') {
+      const value = params.payment?.value;
+      const dueDate = this.parseGatewayDate(
+        this.readString(params.payment?.dueDate),
+      );
+
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        updateData.amountCents = Math.round(value * 100);
+      }
+
+      if (dueDate) {
+        // Data de calendário: meio-dia UTC, como no resto das cobranças.
+        updateData.dueDate = new Date(
+          Date.UTC(
+            dueDate.getUTCFullYear(),
+            dueDate.getUTCMonth(),
+            dueDate.getUTCDate(),
+            12,
+          ),
+        );
+      }
+
+      updateData.identificationField = null;
+      updateData.barCode = null;
+      updateData.pixPayload = null;
+      updateData.pixExpiresAt = null;
+    }
+
     if (statusChanged && params.webhookCreatedAt) {
       updateData.gatewayStatusUpdatedAt = params.webhookCreatedAt;
     }

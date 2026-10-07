@@ -152,6 +152,14 @@ export class BillingGatewayService {
       },
     });
 
+    // Os ids de cliente no Asaas são da conta. Com chave nova (talvez de
+    // outra conta), cada pagador é procurado de novo pelo externalReference
+    // na próxima emissão — na mesma conta ele é reencontrado, sem duplicar.
+    await this.prisma.billingCustomer.updateMany({
+      where: { companyId, asaasCustomerId: { not: null } },
+      data: { asaasCustomerId: null, asaasSyncedAt: null },
+    });
+
     await this.audit.record({
       companyId,
       actorUserId: actor.id,
@@ -333,6 +341,55 @@ export class BillingGatewayService {
       webhookSetup: url
         ? { mode: 'automatic' as const, url, path, authToken: null }
         : { mode: 'manual' as const, url: null, path, authToken: token },
+    };
+  }
+
+  /**
+   * Cliente Asaas para emitir em nome da empresa. Recusa (400, com o que
+   * falta) se o gateway não for Asaas ou a configuração não estiver pronta —
+   * nesse caso nenhuma chamada ao Asaas acontece.
+   */
+  async getIssuingClient(companyId: string) {
+    const settings = await ensureCompanyBillingSettings(this.prisma, companyId);
+    const view = this.toView(settings);
+
+    if (settings.gatewayMode !== BillingGatewayMode.ASAAS) {
+      throw new BadRequestException(
+        'A empresa usa gateway próprio: esta cobrança não vai para o Asaas.',
+      );
+    }
+
+    if (!view.readyToIssue) {
+      throw new BadRequestException(
+        `A integração com o Asaas não está pronta. Falta: ${view.pendingSteps.join(' ')}`,
+      );
+    }
+
+    const apiKey = this.decryptApiKey(settings);
+
+    if (!apiKey) {
+      throw new BadRequestException(
+        'A chave do Asaas salva não pôde ser lida. Salve a chave de API novamente em Gateway de cobrança.',
+      );
+    }
+
+    const config = this.readConfig();
+
+    return {
+      client: this.asaasClients.create(apiKey),
+      environment: config.environment,
+    };
+  }
+
+  /** Resumo do gateway para a emissão decidir o caminho (sem chamar o Asaas). */
+  async getIssuingMode(companyId: string) {
+    const settings = await ensureCompanyBillingSettings(this.prisma, companyId);
+    const view = this.toView(settings);
+
+    return {
+      gateway: settings.gatewayMode,
+      readyToIssue: view.readyToIssue,
+      pendingSteps: view.pendingSteps,
     };
   }
 

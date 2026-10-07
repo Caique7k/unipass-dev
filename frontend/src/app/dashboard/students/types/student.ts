@@ -28,7 +28,8 @@ export type Student = {
     id: string;
     name: string;
     email?: string | null;
-    document?: string | null;
+    documentMasked?: string | null;
+    hasDocument?: boolean;
     phone?: string | null;
   } | null;
   routes?: {
