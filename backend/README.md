@@ -24,11 +24,13 @@ Por padrao a API sobe em `http://localhost:4000`.
 - `BILLING_WEBHOOK_WORKER_CONCURRENCY`: quantidade de webhooks financeiros processados em paralelo pelo worker.
 - `BILLING_WEBHOOK_PENDING_AGE_SECONDS`: idade minima, em segundos, para o cron reprocessar webhooks pendentes.
 - `BILLING_WEBHOOK_RETRY_BATCH_SIZE`: quantidade maxima de webhooks pendentes reprocessados por minuto.
-- `ASAAS_WEBHOOK_TOKEN`: token legado do Asaas, se voce quiser manter uma checagem adicional por header.
-- `ASAAS_WEBHOOK_IP_WHITELIST`: lista separada por virgula com IPs autorizados a chamar o webhook.
-- `ASAAS_WEBHOOK_HMAC_SECRET`: segredo usado para validar a assinatura HMAC do payload bruto.
-- `ASAAS_WEBHOOK_SIGNATURE_HEADER`: nome do header que carrega a assinatura HMAC. Padrao: `asaas-signature`.
-- `ASAAS_WEBHOOK_HMAC_ALGORITHM`: algoritmo da assinatura HMAC. Padrao: `sha256`.
+- `ASAAS_ENV`: `sandbox` ou `production`. Define que prefixo de chave as empresas podem salvar (`$aact_hmlg_` no sandbox, `$aact_prod_` em producao).
+- `ASAAS_API_URL`: `https://api-sandbox.asaas.com/v3` (sandbox) ou `https://api.asaas.com/v3` (producao). Precisa ser https.
+- `BILLING_ENCRYPTION_KEY`: chave mestra (32 bytes em base64, `openssl rand -base64 32`) que cifra a chave de API do Asaas de cada empresa no banco. Sem ela, nenhuma empresa consegue salvar a chave. Trocar o valor torna ilegiveis as chaves ja salvas (as empresas precisam salvar de novo).
+- `ASAAS_WEBHOOK_PUBLIC_BASE_URL`: opcional. Endereco publico https da API (ex.: `https://api.seudominio.com`). Com ela, o botao "Cadastrar webhook" registra o webhook direto na conta Asaas da empresa; sem ela, a tela mostra URL + token para cadastro manual.
+- `ASAAS_API_KEY`: nao e usada em tempo de execucao (cada empresa salva a propria chave pela tela "Gateway de cobranca").
+- `ASAAS_WEBHOOK_TOKEN`: so para a rota legada `POST /billing/webhook/asaas`. Sem ela, a rota legada recusa tudo (401). A rota por empresa (`/billing/webhook/asaas/:endpointKey`) usa o token gerado na tela.
+- `ASAAS_WEBHOOK_IP_WHITELIST`: lista separada por virgula com IPs autorizados a chamar os webhooks. Usa o IP da conexao (`req.ip`); atras de proxy, configure `trust proxy` antes de ligar.
 - `COOKIE_SECURE`: use `true` em producao com HTTPS.
 - `COOKIE_SAME_SITE`: use `none` quando frontend e backend estiverem em dominios diferentes e com HTTPS.
 - `COOKIE_DOMAIN`: defina apenas se voce realmente precisar compartilhar cookie entre subdominios.

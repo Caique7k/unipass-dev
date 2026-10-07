@@ -2,8 +2,6 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   BillingChargeStatus,
-  BillingGatewayMode,
-  BillingOnboardingStatus,
   BillingTargetScope,
   Prisma,
   UserRole,
@@ -18,10 +16,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BillingWebhookService } from './billing-webhook.service';
 import type { BillingChargeStatusFilter } from './dto/find-billing-charges.dto';
 import { IssueBillingChargesDto } from './dto/issue-billing-charges.dto';
-import { UpdateCompanyBillingSettingsDto } from './dto/update-company-billing-settings.dto';
+import { maskDocument } from './billing-crypto.util';
+import {
+  ensureCompanyBillingSettings,
+  requireBillingCompanyId,
+} from './billing-settings.util';
 
 type BillingAccessScope = 'company' | 'self';
-
 
 const billingChargeRelations = {
   ownerUser: {
@@ -112,8 +113,8 @@ export class BillingService {
     userId: string;
     role: UserRole;
   }) {
-    const companyId = this.requireCompanyId(params.companyId);
-    const settings = await this.ensureCompanySettings(companyId);
+    const companyId = requireBillingCompanyId(params.companyId);
+    const settings = await ensureCompanyBillingSettings(this.prisma, companyId);
     const scope = this.getAccessScope(params.role);
     const chargesWhere = this.buildChargeAccessWhere({
       companyId,
@@ -164,9 +165,8 @@ export class BillingService {
         canViewCompanyOverview: scope === 'company',
         canViewOwnCharges: true,
       },
-      settings: this.mapSettings(settings),
-      tutorial: this.getTutorialContent(),
-      onboardingChecklist: this.getOnboardingChecklist(settings),
+      // Só o modo; a situação detalhada do Asaas é GET /billing/gateway (ADMIN).
+      gateway: settings.gatewayMode,
       summaryCards: this.buildSummaryCards({
         scope,
         totalCharges,
@@ -174,7 +174,7 @@ export class BillingService {
         openCharges,
         overdueCharges,
       }),
-      charges: charges.map((charge) => this.mapCharge(charge, now)),
+      charges: charges.map((charge) => this.mapCharge(charge, now, scope)),
     };
   }
 
@@ -189,7 +189,7 @@ export class BillingService {
     month?: string;
     status?: BillingChargeStatusFilter;
   }) {
-    const companyId = this.requireCompanyId(params.companyId);
+    const companyId = requireBillingCompanyId(params.companyId);
     const page = params.page && params.page > 0 ? params.page : 1;
     const limit =
       params.limit && params.limit > 0 ? Math.min(params.limit, 50) : 10;
@@ -249,7 +249,9 @@ export class BillingService {
     ]);
 
     return {
-      data: data.map((charge) => this.mapCharge(charge, now)),
+      data: data.map((charge) =>
+        this.mapCharge(charge, now, this.getAccessScope(params.role)),
+      ),
       total,
       page,
       lastPage: Math.max(1, Math.ceil(total / limit)),
@@ -260,7 +262,7 @@ export class BillingService {
     companyId: string | null | undefined,
     dto: IssueBillingChargesDto,
   ) {
-    const normalizedCompanyId = this.requireCompanyId(companyId);
+    const normalizedCompanyId = requireBillingCompanyId(companyId);
     const issueDate = this.parseDateKey(dto.issueDate);
 
     if (!issueDate) {
@@ -489,106 +491,6 @@ export class BillingService {
     });
   }
 
-  async updateCompanySettings(
-    companyId: string | null | undefined,
-    dto: UpdateCompanyBillingSettingsDto,
-  ) {
-    const normalizedCompanyId = this.requireCompanyId(companyId);
-    const currentSettings =
-      await this.ensureCompanySettings(normalizedCompanyId);
-    const now = new Date();
-    const nextGatewayMode =
-      dto.usePlatformGateway === undefined
-        ? undefined
-        : dto.usePlatformGateway
-          ? BillingGatewayMode.PLATFORM_GATEWAY
-          : BillingGatewayMode.EXTERNAL;
-    const nextOnboardingStatus =
-      dto.usePlatformGateway === undefined
-        ? undefined
-        : this.resolveOnboardingStatusChange(
-            currentSettings.onboardingStatus,
-            dto.usePlatformGateway,
-          );
-
-    const updated = await this.prisma.companyBillingSettings.update({
-      where: {
-        companyId: normalizedCompanyId,
-      },
-      data: {
-        gatewayMode: nextGatewayMode,
-        onboardingStatus: nextOnboardingStatus,
-        gatewayContactName: this.normalizeOptionalString(
-          dto.gatewayContactName,
-        ),
-        gatewayContactEmail: this.normalizeOptionalString(
-          dto.gatewayContactEmail,
-        ),
-        gatewayContactPhone: this.normalizeOptionalString(
-          dto.gatewayContactPhone,
-        ),
-        legalEntityName: this.normalizeOptionalString(dto.legalEntityName),
-        legalDocument: this.normalizeOptionalString(dto.legalDocument),
-        bankInfoSummary: this.normalizeOptionalString(dto.bankInfoSummary),
-        defaultAmountCents: dto.defaultAmountCents,
-        defaultDueDay: dto.defaultDueDay,
-        lgpdAcceptedAt:
-          dto.lgpdAccepted === undefined
-            ? undefined
-            : dto.lgpdAccepted
-              ? (currentSettings.lgpdAcceptedAt ?? now)
-              : null,
-        platformTermsAcceptedAt:
-          dto.platformTermsAccepted === undefined
-            ? undefined
-            : dto.platformTermsAccepted
-              ? (currentSettings.platformTermsAcceptedAt ?? now)
-              : null,
-      },
-    });
-
-    return this.mapSettings(updated);
-  }
-
-  async submitOnboarding(companyId: string | null | undefined) {
-    const normalizedCompanyId = this.requireCompanyId(companyId);
-    const settings = await this.ensureCompanySettings(normalizedCompanyId);
-
-    if (settings.gatewayMode !== BillingGatewayMode.PLATFORM_GATEWAY) {
-      throw new BadRequestException(
-        'Ative o gateway da plataforma antes de enviar o onboarding.',
-      );
-    }
-
-    const missingFields = [
-      !settings.gatewayContactName && 'responsavel financeiro',
-      !settings.gatewayContactEmail && 'e-mail financeiro',
-      !settings.legalEntityName && 'razao social',
-      !settings.legalDocument && 'documento da empresa',
-      !settings.bankInfoSummary && 'resumo das informacoes bancarias',
-      !settings.lgpdAcceptedAt && 'aceite de protecao de dados',
-      !settings.platformTermsAcceptedAt && 'aceite dos termos da plataforma',
-    ].filter(Boolean);
-
-    if (missingFields.length > 0) {
-      throw new BadRequestException(
-        `Complete os seguintes campos antes de enviar: ${missingFields.join(', ')}.`,
-      );
-    }
-
-    const updated = await this.prisma.companyBillingSettings.update({
-      where: {
-        companyId: normalizedCompanyId,
-      },
-      data: {
-        onboardingStatus: BillingOnboardingStatus.UNDER_REVIEW,
-        submittedAt: new Date(),
-      },
-    });
-
-    return this.mapSettings(updated);
-  }
-
   @Cron(CronExpression.EVERY_HOUR)
   async releaseScheduledCharges() {
     await this.prisma.billingCharge.updateMany({
@@ -602,43 +504,6 @@ export class BillingService {
         status: BillingChargeStatus.ISSUED,
       },
     });
-  }
-
-  private async ensureCompanySettings(companyId: string) {
-    const company = await this.prisma.company.findUnique({
-      where: {
-        id: companyId,
-      },
-      select: {
-        id: true,
-      },
-    });
-
-    if (!company) {
-      throw new BadRequestException(
-        'Empresa nao encontrada para o modulo financeiro.',
-      );
-    }
-
-    return this.prisma.companyBillingSettings.upsert({
-      where: {
-        companyId,
-      },
-      update: {},
-      create: {
-        companyId,
-      },
-    });
-  }
-
-  private requireCompanyId(companyId?: string | null) {
-    if (!companyId) {
-      throw new BadRequestException(
-        'Este usuario nao esta vinculado a uma empresa.',
-      );
-    }
-
-    return companyId;
   }
 
   private getAccessScope(role: UserRole): BillingAccessScope {
@@ -801,6 +666,10 @@ export class BillingService {
         return {
           status: BillingChargeStatus.FAILED,
         } satisfies Prisma.BillingChargeWhereInput;
+      case 'REFUNDED':
+        return {
+          status: BillingChargeStatus.REFUNDED,
+        } satisfies Prisma.BillingChargeWhereInput;
       case 'ALL':
       case undefined:
         return null;
@@ -813,7 +682,11 @@ export class BillingService {
     return buildOverdueChargeWhere(now);
   }
 
-  private mapCharge(charge: BillingChargeWithRelations, now: Date) {
+  private mapCharge(
+    charge: BillingChargeWithRelations,
+    now: Date,
+    scope: BillingAccessScope,
+  ) {
     return {
       id: charge.id,
       description: charge.description,
@@ -830,7 +703,19 @@ export class BillingService {
       recipientEmail: charge.recipientEmail,
       isOverdue: this.isChargeOverdue(charge, now),
       student: charge.student,
-      customer: charge.customer,
+      // CPF/CNPJ do pagador sempre mascarado; o id do cliente no Asaas só
+      // para quem administra a empresa.
+      customer: charge.customer
+        ? {
+            id: charge.customer.id,
+            name: charge.customer.name,
+            email: charge.customer.email,
+            document: maskDocument(charge.customer.document),
+            ...(scope === 'company'
+              ? { asaasCustomerId: charge.customer.asaasCustomerId }
+              : {}),
+          }
+        : null,
       template: charge.template,
       ownerUser: charge.ownerUser
         ? {
@@ -981,84 +866,6 @@ export class BillingService {
     };
   }
 
-  private resolveOnboardingStatusChange(
-    currentStatus: BillingOnboardingStatus,
-    usePlatformGateway: boolean,
-  ) {
-    if (!usePlatformGateway) {
-      if (
-        currentStatus === BillingOnboardingStatus.ACTIVE ||
-        currentStatus === BillingOnboardingStatus.UNDER_REVIEW
-      ) {
-        return BillingOnboardingStatus.SUSPENDED;
-      }
-
-      return BillingOnboardingStatus.NOT_STARTED;
-    }
-
-    if (
-      currentStatus === BillingOnboardingStatus.ACTIVE ||
-      currentStatus === BillingOnboardingStatus.UNDER_REVIEW
-    ) {
-      return currentStatus;
-    }
-
-    return BillingOnboardingStatus.IN_PROGRESS;
-  }
-
-  private normalizeOptionalString(value?: string) {
-    if (value === undefined) {
-      return undefined;
-    }
-
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : null;
-  }
-
-  private mapSettings(settings: {
-    gatewayMode: BillingGatewayMode;
-    onboardingStatus: BillingOnboardingStatus;
-    gatewayContactName: string | null;
-    gatewayContactEmail: string | null;
-    gatewayContactPhone: string | null;
-    legalEntityName: string | null;
-    legalDocument: string | null;
-    bankInfoSummary: string | null;
-    defaultAmountCents: number | null;
-    defaultDueDay: number | null;
-    lgpdAcceptedAt: Date | null;
-    platformTermsAcceptedAt: Date | null;
-    submittedAt: Date | null;
-    reviewedAt: Date | null;
-    reviewNotes: string | null;
-    asaasAccountId: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }) {
-    return {
-      usePlatformGateway:
-        settings.gatewayMode === BillingGatewayMode.PLATFORM_GATEWAY,
-      gatewayMode: settings.gatewayMode,
-      onboardingStatus: settings.onboardingStatus,
-      gatewayContactName: settings.gatewayContactName,
-      gatewayContactEmail: settings.gatewayContactEmail,
-      gatewayContactPhone: settings.gatewayContactPhone,
-      legalEntityName: settings.legalEntityName,
-      legalDocument: settings.legalDocument,
-      bankInfoSummary: settings.bankInfoSummary,
-      defaultAmountCents: settings.defaultAmountCents,
-      defaultDueDay: settings.defaultDueDay,
-      lgpdAcceptedAt: settings.lgpdAcceptedAt,
-      platformTermsAcceptedAt: settings.platformTermsAcceptedAt,
-      submittedAt: settings.submittedAt,
-      reviewedAt: settings.reviewedAt,
-      reviewNotes: settings.reviewNotes,
-      asaasAccountId: settings.asaasAccountId,
-      createdAt: settings.createdAt,
-      updatedAt: settings.updatedAt,
-    };
-  }
-
   private buildSummaryCards(params: {
     scope: BillingAccessScope;
     totalCharges: number;
@@ -1099,79 +906,6 @@ export class BillingService {
         label: openLabel,
         value: params.openCharges,
         helper: 'Cobrancas aguardando pagamento.',
-      },
-    ];
-  }
-
-  private getOnboardingChecklist(settings: {
-    gatewayMode: BillingGatewayMode;
-    gatewayContactName: string | null;
-    gatewayContactEmail: string | null;
-    legalEntityName: string | null;
-    legalDocument: string | null;
-    bankInfoSummary: string | null;
-    lgpdAcceptedAt: Date | null;
-    platformTermsAcceptedAt: Date | null;
-  }) {
-    return [
-      {
-        id: 'gateway',
-        label: 'Gateway da plataforma ativado',
-        done: settings.gatewayMode === BillingGatewayMode.PLATFORM_GATEWAY,
-      },
-      {
-        id: 'contact',
-        label: 'Contato financeiro cadastrado',
-        done: !!settings.gatewayContactName && !!settings.gatewayContactEmail,
-      },
-      {
-        id: 'legal',
-        label: 'Razao social e documento preenchidos',
-        done: !!settings.legalEntityName && !!settings.legalDocument,
-      },
-      {
-        id: 'bank',
-        label: 'Informacoes bancarias resumidas',
-        done: !!settings.bankInfoSummary,
-      },
-      {
-        id: 'lgpd',
-        label: 'Aceite de protecao de dados',
-        done: !!settings.lgpdAcceptedAt,
-      },
-      {
-        id: 'terms',
-        label: 'Aceite dos termos operacionais',
-        done: !!settings.platformTermsAcceptedAt,
-      },
-    ];
-  }
-
-  private getTutorialContent() {
-    return [
-      {
-        id: 'optional-module',
-        title: 'Modulo opcional por empresa',
-        description:
-          'O UniPass nao obriga a empresa a usar o gateway da plataforma. Quem ja possui operacao propria pode continuar externo sem perder o restante do sistema.',
-      },
-      {
-        id: 'financial-data',
-        title: 'Dados financeiros e bancarios',
-        description:
-          'Ao ativar o gateway da plataforma, a empresa precisa informar responsavel financeiro, documento da empresa e dados bancarios para repasse e validacao operacional.',
-      },
-      {
-        id: 'privacy',
-        title: 'Protecao de dados e rastreabilidade',
-        description:
-          'Toda cobranca precisa ter trilha de auditoria, aceite de dados e uma politica clara de quem pode ver inadimplencia. No UniPass, apenas administradores veem a visao consolidada da empresa; os demais perfis ficam restritos as cobrancas proprias.',
-      },
-      {
-        id: 'automation',
-        title: 'Emissao pelos grupos vinculados',
-        description:
-          'Os boletos agora podem ser emitidos a partir dos grupos vinculados aos alunos, herdando valor e vencimento do template escolhido para cada cobranca.',
       },
     ];
   }

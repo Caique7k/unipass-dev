@@ -3,18 +3,14 @@
 import type { ComponentProps } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import { useRouter } from "next/navigation";
 import {
   CalendarClock,
-  CheckCircle2,
-  Clock3,
   ExternalLink,
-  FileText,
   LoaderCircle,
-  PencilLine,
   RefreshCw,
   Search,
   SendHorizontal,
-  ShieldCheck,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,10 +25,15 @@ import { AccessDenied } from "@/components/AccessDenied";
 import {
   GhostButton,
   PageHeader,
+  StatusBadge,
 } from "@/app/dashboard/components/page-kit";
+import { useBillingGateway } from "./settings/hooks/useBillingGateway";
+import {
+  gatewayStatusMeta,
+  type BillingGatewayMode,
+} from "./settings/types/billing-gateway";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import {
@@ -58,13 +59,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
-import { roleLabels, type UserRole } from "@/lib/permissions";
+import type { UserRole } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import api from "@/services/api";
 
 type AccessScope = "company" | "self";
-type BillingTab = "company" | "issue" | "charges";
+type BillingTab = "issue" | "charges";
 type BillingChargeStatus =
   | "DRAFT"
   | "SCHEDULED"
@@ -73,7 +73,8 @@ type BillingChargeStatus =
   | "PAID"
   | "OVERDUE"
   | "CANCELLED"
-  | "FAILED";
+  | "FAILED"
+  | "REFUNDED";
 type BillingChargeStatusFilter =
   | "ALL"
   | "OPEN"
@@ -84,15 +85,8 @@ type BillingChargeStatusFilter =
   | "SENT"
   | "DRAFT"
   | "CANCELLED"
-  | "FAILED";
-type BillingGatewayMode = "EXTERNAL" | "PLATFORM_GATEWAY";
-type BillingOnboardingStatus =
-  | "NOT_STARTED"
-  | "IN_PROGRESS"
-  | "UNDER_REVIEW"
-  | "ACTIVE"
-  | "REJECTED"
-  | "SUSPENDED";
+  | "FAILED"
+  | "REFUNDED";
 
 type BillingOverviewResponse = {
   accessScope: AccessScope;
@@ -101,37 +95,7 @@ type BillingOverviewResponse = {
     canViewCompanyOverview: boolean;
     canViewOwnCharges: boolean;
   };
-  settings: {
-    usePlatformGateway: boolean;
-    gatewayMode: BillingGatewayMode;
-    onboardingStatus: BillingOnboardingStatus;
-    gatewayContactName: string | null;
-    gatewayContactEmail: string | null;
-    gatewayContactPhone: string | null;
-    legalEntityName: string | null;
-    legalDocument: string | null;
-    bankInfoSummary: string | null;
-    defaultAmountCents: number | null;
-    defaultDueDay: number | null;
-    lgpdAcceptedAt: string | null;
-    platformTermsAcceptedAt: string | null;
-    submittedAt: string | null;
-    reviewedAt: string | null;
-    reviewNotes: string | null;
-    asaasAccountId: string | null;
-    createdAt: string;
-    updatedAt: string;
-  };
-  tutorial: Array<{
-    id: string;
-    title: string;
-    description: string;
-  }>;
-  onboardingChecklist: Array<{
-    id: string;
-    label: string;
-    done: boolean;
-  }>;
+  gateway: BillingGatewayMode;
   summaryCards: Array<{
     id: string;
     label: string;
@@ -165,8 +129,9 @@ type BillingCharge = {
     id: string;
     name: string;
     email: string | null;
+    // Mascarado pelo backend; o id do Asaas só vem para o ADMIN.
     document: string | null;
-    asaasCustomerId: string | null;
+    asaasCustomerId?: string | null;
   } | null;
   template: {
     id: string;
@@ -198,18 +163,6 @@ type BillingIssueResponse = {
   skippedCount: number;
 };
 
-type BillingSettingsForm = {
-  usePlatformGateway: boolean;
-  gatewayContactName: string;
-  gatewayContactEmail: string;
-  gatewayContactPhone: string;
-  legalEntityName: string;
-  legalDocument: string;
-  bankInfoSummary: string;
-  lgpdAccepted: boolean;
-  platformTermsAccepted: boolean;
-};
-
 type ChargeFilters = {
   search: string;
   month: string;
@@ -238,6 +191,7 @@ const chargeStatusFilterOptions: Array<{
   { value: "DRAFT", label: "Rascunho" },
   { value: "CANCELLED", label: "Cancelados" },
   { value: "FAILED", label: "Falharam" },
+  { value: "REFUNDED", label: "Estornados" },
 ];
 
 const primaryChargeStatusTabs: BillingChargeStatusFilter[] = [
@@ -280,15 +234,6 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "--";
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
 function formatMonthLabel(value?: string | null) {
   if (!value) return "--";
 
@@ -301,7 +246,7 @@ function formatMonthLabel(value?: string | null) {
   return `${match[2]}/${match[1]}`;
 }
 
-function formatStatus(status: BillingChargeStatus | BillingOnboardingStatus) {
+function formatStatus(status: BillingChargeStatus) {
   const labels: Record<string, string> = {
     DRAFT: "Rascunho",
     SCHEDULED: "Agendado",
@@ -311,12 +256,7 @@ function formatStatus(status: BillingChargeStatus | BillingOnboardingStatus) {
     OVERDUE: "Em atraso",
     CANCELLED: "Cancelado",
     FAILED: "Falhou",
-    NOT_STARTED: "Nao iniciado",
-    IN_PROGRESS: "Em configuracao",
-    UNDER_REVIEW: "Em analise",
-    ACTIVE: "Ativo",
-    REJECTED: "Rejeitado",
-    SUSPENDED: "Suspenso",
+    REFUNDED: "Estornado",
   };
 
   return labels[status] ?? status;
@@ -352,20 +292,6 @@ function getCurrentMonthKey() {
   return getDateKey().slice(0, 7);
 }
 
-function buildInitialForm(): BillingSettingsForm {
-  return {
-    usePlatformGateway: false,
-    gatewayContactName: "",
-    gatewayContactEmail: "",
-    gatewayContactPhone: "",
-    legalEntityName: "",
-    legalDocument: "",
-    bankInfoSummary: "",
-    lgpdAccepted: false,
-    platformTermsAccepted: false,
-  };
-}
-
 function buildDefaultChargeFilters(): ChargeFilters {
   return {
     search: "",
@@ -384,25 +310,6 @@ function buildDefaultIssueForm(): BillingIssueForm {
   };
 }
 
-function hasBillingConfiguration(settings: BillingOverviewResponse["settings"]) {
-  return (
-    settings.createdAt !== settings.updatedAt ||
-    settings.usePlatformGateway ||
-    !!settings.gatewayContactName ||
-    !!settings.gatewayContactEmail ||
-    !!settings.gatewayContactPhone ||
-    !!settings.legalEntityName ||
-    !!settings.legalDocument ||
-    !!settings.bankInfoSummary ||
-    !!settings.lgpdAcceptedAt ||
-    !!settings.platformTermsAcceptedAt ||
-    !!settings.submittedAt ||
-    !!settings.reviewedAt ||
-    !!settings.reviewNotes ||
-    !!settings.asaasAccountId
-  );
-}
-
 function getChargeStatusTone(charge: BillingCharge) {
   if (charge.isOverdue) {
     return "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300";
@@ -412,7 +319,11 @@ function getChargeStatusTone(charge: BillingCharge) {
     return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
   }
 
-  if (charge.status === "CANCELLED" || charge.status === "FAILED") {
+  if (
+    charge.status === "CANCELLED" ||
+    charge.status === "FAILED" ||
+    charge.status === "REFUNDED"
+  ) {
     return "bg-slate-200 text-slate-700 dark:bg-slate-900/60 dark:text-slate-300";
   }
 
@@ -440,12 +351,8 @@ export default function BillingPage() {
   const [overview, setOverview] = useState<BillingOverviewResponse | null>(
     null,
   );
-  const [form, setForm] = useState<BillingSettingsForm>(buildInitialForm);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [isEditingSettings, setIsEditingSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<BillingTab>("charges");
   const [chargeFilters, setChargeFilters] = useState<ChargeFilters>(
     buildDefaultChargeFilters,
@@ -471,29 +378,11 @@ export default function BillingPage() {
     user?.role ?? "",
   );
 
-  const syncFromOverview = useCallback(
-    (nextOverview: BillingOverviewResponse) => {
-      setOverview(nextOverview);
-      setForm({
-        usePlatformGateway: nextOverview.settings.usePlatformGateway,
-        gatewayContactName: nextOverview.settings.gatewayContactName ?? "",
-        gatewayContactEmail: nextOverview.settings.gatewayContactEmail ?? "",
-        gatewayContactPhone: nextOverview.settings.gatewayContactPhone ?? "",
-        legalEntityName: nextOverview.settings.legalEntityName ?? "",
-        legalDocument: nextOverview.settings.legalDocument ?? "",
-        bankInfoSummary: nextOverview.settings.bankInfoSummary ?? "",
-        lgpdAccepted: !!nextOverview.settings.lgpdAcceptedAt,
-        platformTermsAccepted: !!nextOverview.settings.platformTermsAcceptedAt,
-      });
-    },
-    [],
-  );
-
   const fetchOverview = useCallback(async () => {
     try {
       setLoadError(null);
       const response = await api.get<BillingOverviewResponse>("/billing/overview");
-      syncFromOverview(response.data);
+      setOverview(response.data);
     } catch (error: unknown) {
       const message = getErrorMessage(
         error,
@@ -504,7 +393,7 @@ export default function BillingPage() {
     } finally {
       setLoading(false);
     }
-  }, [syncFromOverview]);
+  }, []);
 
   const fetchCharges = useCallback(
     async (nextFilters: ChargeFilters = chargeFilters) => {
@@ -600,13 +489,6 @@ export default function BillingPage() {
     void fetchTemplates();
   }, [canAccess, fetchTemplates]);
 
-  useEffect(() => {
-    if (!overview) {
-      return;
-    }
-
-    setIsEditingSettings(!hasBillingConfiguration(overview.settings));
-  }, [overview]);
 
   const selectedTemplate = useMemo(
     () =>
@@ -633,15 +515,8 @@ export default function BillingPage() {
     return selectedTemplate?._count.students ?? 0;
   }, [issueForm.templateId, selectedTemplate, templateOptions]);
 
-  const showGatewayTabs =
-    overview?.settings.usePlatformGateway || isEditingSettings || form.usePlatformGateway;
-
   const availableTabs = useMemo(() => {
     const tabs: Array<{ id: BillingTab; label: string }> = [];
-
-    if (canManageGateway) {
-      tabs.push({ id: "company", label: "Cadastro da empresa" });
-    }
 
     if (canIssueCharges) {
       tabs.push({ id: "issue", label: "Emissao em lote" });
@@ -653,17 +528,13 @@ export default function BillingPage() {
     });
 
     return tabs;
-  }, [canIssueCharges, canManageGateway, overview?.accessScope]);
+  }, [canIssueCharges, overview?.accessScope]);
 
   useEffect(() => {
-    if (!showGatewayTabs) {
-      return;
-    }
-
     if (!availableTabs.some((tab) => tab.id === activeTab)) {
       setActiveTab(availableTabs[0]?.id ?? "charges");
     }
-  }, [activeTab, availableTabs, showGatewayTabs]);
+  }, [activeTab, availableTabs]);
 
   if (isPlatformAdmin) {
     return (
@@ -694,50 +565,6 @@ export default function BillingPage() {
       fetchCharges(),
       canViewTemplateCatalog ? fetchTemplates() : Promise.resolve(),
     ]);
-  }
-
-  async function handleSaveSettings() {
-    setSaving(true);
-
-    try {
-      await api.patch("/billing/settings", {
-        usePlatformGateway: form.usePlatformGateway,
-        gatewayContactName: form.gatewayContactName,
-        gatewayContactEmail: form.gatewayContactEmail,
-        gatewayContactPhone: form.gatewayContactPhone,
-        legalEntityName: form.legalEntityName,
-        legalDocument: form.legalDocument,
-        bankInfoSummary: form.bankInfoSummary,
-        lgpdAccepted: form.lgpdAccepted,
-        platformTermsAccepted: form.platformTermsAccepted,
-      });
-
-      toast.success("Configuracao financeira salva.");
-      setIsEditingSettings(false);
-      await fetchOverview();
-    } catch (error: unknown) {
-      toast.error(
-        getErrorMessage(error, "Nao foi possivel salvar as configuracoes."),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleSubmitOnboarding() {
-    setSubmitting(true);
-
-    try {
-      await api.post("/billing/settings/submit-onboarding");
-      toast.success("Onboarding financeiro enviado para analise.");
-      await fetchOverview();
-    } catch (error: unknown) {
-      toast.error(
-        getErrorMessage(error, "Nao foi possivel enviar o onboarding."),
-      );
-    } finally {
-      setSubmitting(false);
-    }
   }
 
   async function handleIssueCharges() {
@@ -795,28 +622,6 @@ export default function BillingPage() {
     }
   }
 
-  function handleCancelSettingsEdit() {
-    if (!overview) {
-      return;
-    }
-
-    syncFromOverview(overview);
-    setIsEditingSettings(false);
-  }
-
-  function handleStartGatewaySetup() {
-    setForm((current) => ({
-      ...current,
-      usePlatformGateway: true,
-    }));
-    setIsEditingSettings(true);
-    setActiveTab(canManageGateway ? "company" : "charges");
-  }
-
-  const statusTone = overview.settings.usePlatformGateway
-    ? "border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/60 dark:bg-emerald-950/20"
-    : "border-amber-200 bg-amber-50/80 dark:border-amber-900/60 dark:bg-amber-950/20";
-
   const { pages, start, end } = buildPaginationPages(
     chargeFilters.page,
     chargeLastPage,
@@ -837,9 +642,9 @@ export default function BillingPage() {
         eyebrow="Financeiro"
         title="Boletos"
         description={
-          !showGatewayTabs
-            ? "Enquanto a empresa não usa o gateway da plataforma, esta área fica focada na explicação e no preparo do onboarding."
-            : "A operação financeira é separada por etapas: cadastro da empresa, emissão em lote e acompanhamento dos boletos."
+          canIssueCharges
+            ? "Emissão em lote e acompanhamento dos boletos da empresa."
+            : "Acompanhe as cobranças vinculadas ao seu usuário."
         }
         actions={
           <GhostButton onClick={() => void handleRefreshAll()}>
@@ -852,445 +657,30 @@ export default function BillingPage() {
         }
       />
 
-      <ModeBanner
-        overview={overview}
-        statusTone={statusTone}
-        userRole={user?.role as UserRole | undefined}
-      />
-
-      {!showGatewayTabs ? (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_360px]">
-          <Card className="rounded-3xl border border-border/60">
-            <CardHeader className="space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-2xl bg-[#fff2ea] text-[#ff5c00] dark:bg-[#2d211a]">
-                  <FileText className="size-5" />
-                </div>
-                <div>
-                  <CardTitle>Como funciona o gateway</CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    Sem o gateway da plataforma, a experiencia fica reduzida a
-                    consulta e explicacao do processo.
-                  </p>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              {overview.tutorial.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-2xl border border-border/60 bg-card/60 p-4"
-                >
-                  <p className="font-medium">{item.title}</p>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {item.description}
-                  </p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border border-border/60">
-            <CardHeader className="space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-2xl bg-[#eef6ff] text-sky-700 dark:bg-[#132533] dark:text-sky-300">
-                  <ShieldCheck className="size-5" />
-                </div>
-                <div>
-                  <CardTitle>
-                    {canManageGateway
-                      ? "Ativar gateway da plataforma"
-                      : "Gateway ainda nao habilitado"}
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    {canManageGateway
-                      ? "Quando a empresa decidir usar o gateway da plataforma, as abas de operacao financeira aparecem automaticamente."
-                      : "Somente o administrador pode iniciar a configuracao do gateway da plataforma."}
-                  </p>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <StaticField
-                label="Status atual"
-                value={formatStatus(overview.settings.onboardingStatus)}
-              />
-              <StaticField
-                label="Gateway"
-                value={
-                  overview.settings.usePlatformGateway
-                    ? "Gateway da plataforma"
-                    : "Gateway externo"
-                }
-              />
-
-              {canManageGateway ? (
-                <Button
-                  type="button"
-                  onClick={handleStartGatewaySetup}
-                  className="w-full rounded-2xl bg-[#ff5c00] text-white hover:bg-[#e65300]"
-                >
-                  <Wallet className="mr-2 size-4" />
-                  Quero usar o gateway da plataforma
-                </Button>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                  Aguarde a empresa concluir o onboarding financeiro para liberar a
-                  visao operacional desta area.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+      {canManageGateway ? (
+        <GatewayBanner />
       ) : (
-        <>
-          {availableTabs.length > 1 && (
-            <div className="rounded-2xl border border-border/60 bg-background/70 p-2">
-              <div className="flex flex-wrap gap-2">
-                {availableTabs.map((tab) => (
-                  <TabButton
-                    key={tab.id}
-                    active={activeTab === tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                  >
-                    {tab.label}
-                  </TabButton>
-                ))}
-              </div>
-            </div>
-          )}
+        <p className="text-sm text-muted-foreground">
+          Gateway da empresa:{" "}
+          {overview.gateway === "ASAAS" ? "Asaas" : "Próprio"}
+        </p>
+      )}
 
-          {activeTab === "company" && canManageGateway && (
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_340px]">
-              <Card className="rounded-3xl border border-border/60">
-                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle>Cadastro da empresa</CardTitle>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Depois de salvar, os dados ficam em modo somente leitura ate
-                      voce clicar em editar novamente.
-                    </p>
-                  </div>
-
-                  {!isEditingSettings && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsEditingSettings(true)}
-                      className="rounded-2xl"
-                    >
-                      <PencilLine className="mr-2 size-4" />
-                      Editar configuracoes
-                    </Button>
-                  )}
-                </CardHeader>
-
-                <CardContent className="space-y-6">
-                  {isEditingSettings ? (
-                    <>
-                      <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
-                        <label className="flex items-start gap-3">
-                          <Checkbox
-                            checked={form.usePlatformGateway}
-                            onCheckedChange={(checked) =>
-                              setForm((current) => ({
-                                ...current,
-                                usePlatformGateway: Boolean(checked),
-                              }))
-                            }
-                          />
-                          <div className="space-y-1">
-                            <p className="font-medium">
-                              Utilizar gateway de pagamento da plataforma
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              Ao ligar esta opcao, a empresa entra no fluxo de
-                              cadastro e operacao financeira por aqui.
-                            </p>
-                          </div>
-                        </label>
-                      </div>
-
-                      {form.usePlatformGateway ? (
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <Field
-                            label="Responsavel financeiro"
-                            value={form.gatewayContactName}
-                            onChange={(value) =>
-                              setForm((current) => ({
-                                ...current,
-                                gatewayContactName: value,
-                              }))
-                            }
-                            placeholder="Nome de quem cuida dos recebimentos"
-                          />
-                          <Field
-                            label="E-mail financeiro"
-                            value={form.gatewayContactEmail}
-                            onChange={(value) =>
-                              setForm((current) => ({
-                                ...current,
-                                gatewayContactEmail: value,
-                              }))
-                            }
-                            placeholder="financeiro@empresa.com.br"
-                            type="email"
-                          />
-                          <Field
-                            label="Telefone financeiro"
-                            value={form.gatewayContactPhone}
-                            onChange={(value) =>
-                              setForm((current) => ({
-                                ...current,
-                                gatewayContactPhone: value,
-                              }))
-                            }
-                            placeholder="(11) 99999-0000"
-                          />
-                          <Field
-                            label="Razao social"
-                            value={form.legalEntityName}
-                            onChange={(value) =>
-                              setForm((current) => ({
-                                ...current,
-                                legalEntityName: value,
-                              }))
-                            }
-                            placeholder="Nome juridico da empresa"
-                          />
-                          <Field
-                            label="Documento da empresa"
-                            value={form.legalDocument}
-                            onChange={(value) =>
-                              setForm((current) => ({
-                                ...current,
-                                legalDocument: value,
-                              }))
-                            }
-                            placeholder="CNPJ ou documento de faturamento"
-                          />
-
-                          <div className="space-y-2 md:col-span-2">
-                            <label className="text-sm font-medium">
-                              Resumo das informacoes bancarias
-                            </label>
-                            <Textarea
-                              value={form.bankInfoSummary}
-                              onChange={(event) =>
-                                setForm((current) => ({
-                                  ...current,
-                                  bankInfoSummary: event.target.value,
-                                }))
-                              }
-                              placeholder="Banco, titularidade, regras de repasse, observacoes e o que ja foi validado com a empresa."
-                            />
-                          </div>
-
-                          <label className="flex items-start gap-3 rounded-2xl border border-border/60 p-4">
-                            <Checkbox
-                              checked={form.lgpdAccepted}
-                              onCheckedChange={(checked) =>
-                                setForm((current) => ({
-                                  ...current,
-                                  lgpdAccepted: Boolean(checked),
-                                }))
-                              }
-                            />
-                            <div className="space-y-1">
-                              <p className="font-medium">
-                                Aceite de protecao de dados
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                Confirma que a empresa entende o tratamento de dados
-                                dos pagadores e dos alunos.
-                              </p>
-                            </div>
-                          </label>
-
-                          <label className="flex items-start gap-3 rounded-2xl border border-border/60 p-4">
-                            <Checkbox
-                              checked={form.platformTermsAccepted}
-                              onCheckedChange={(checked) =>
-                                setForm((current) => ({
-                                  ...current,
-                                  platformTermsAccepted: Boolean(checked),
-                                }))
-                              }
-                            />
-                            <div className="space-y-1">
-                              <p className="font-medium">
-                                Aceite dos termos operacionais
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                Confirma repasse, responsabilidade sobre cobranca
-                                e uso do gateway da plataforma.
-                              </p>
-                            </div>
-                          </label>
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-5 text-sm text-muted-foreground">
-                          Se o gateway permanecer desligado, a tela volta para o
-                          modo explicativo.
-                        </div>
-                      )}
-
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleCancelSettingsEdit}
-                          className="rounded-2xl"
-                        >
-                          Cancelar
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => void handleSaveSettings()}
-                          disabled={saving}
-                          className="rounded-2xl bg-[#ff5c00] text-white hover:bg-[#e65300]"
-                        >
-                          {saving ? "Salvando..." : "Salvar configuracao"}
-                        </Button>
-                        {form.usePlatformGateway && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => void handleSubmitOnboarding()}
-                            disabled={submitting}
-                            className="rounded-2xl"
-                          >
-                            <SendHorizontal className="mr-2 size-4" />
-                            {submitting ? "Enviando..." : "Enviar onboarding"}
-                          </Button>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <StaticField
-                          label="Gateway"
-                          value={
-                            form.usePlatformGateway
-                              ? "Gateway da plataforma"
-                              : "Gateway externo"
-                          }
-                        />
-                        <StaticField
-                          label="Status do onboarding"
-                          value={formatStatus(overview.settings.onboardingStatus)}
-                        />
-                        <StaticField
-                          label="Responsavel financeiro"
-                          value={form.gatewayContactName || "Nao informado"}
-                        />
-                        <StaticField
-                          label="E-mail financeiro"
-                          value={form.gatewayContactEmail || "Nao informado"}
-                        />
-                        <StaticField
-                          label="Telefone financeiro"
-                          value={form.gatewayContactPhone || "Nao informado"}
-                        />
-                        <StaticField
-                          label="Razao social"
-                          value={form.legalEntityName || "Nao informado"}
-                        />
-                        <StaticField
-                          label="Documento da empresa"
-                          value={form.legalDocument || "Nao informado"}
-                        />
-                        <StaticField
-                          label="Conta Asaas"
-                          value={
-                            overview.settings.asaasAccountId || "Nao vinculada"
-                          }
-                        />
-                        <div className="space-y-2 md:col-span-2">
-                          <label className="text-sm font-medium">
-                            Resumo das informacoes bancarias
-                          </label>
-                          <div className="min-h-24 rounded-2xl border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
-                            {form.bankInfoSummary ||
-                              "Nenhuma informacao cadastrada."}
-                          </div>
-                        </div>
-                        <StaticField
-                          label="Aceite LGPD"
-                          value={form.lgpdAccepted ? "Aceito" : "Pendente"}
-                        />
-                        <StaticField
-                          label="Termos operacionais"
-                          value={
-                            form.platformTermsAccepted ? "Aceito" : "Pendente"
-                          }
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-3 sm:flex-row">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => void handleSubmitOnboarding()}
-                          disabled={submitting}
-                          className="rounded-2xl"
-                        >
-                          <SendHorizontal className="mr-2 size-4" />
-                          {submitting ? "Enviando..." : "Enviar onboarding"}
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-3xl border border-border/60">
-                <CardHeader className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-11 items-center justify-center rounded-2xl bg-[#eef6ff] text-sky-700 dark:bg-[#132533] dark:text-sky-300">
-                      <ShieldCheck className="size-5" />
-                    </div>
-                    <div>
-                      <CardTitle>Checklist do onboarding</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        A empresa avanca para analise quando o basico estiver
-                        preenchido.
-                      </p>
-                    </div>
-                  </div>
-                </CardHeader>
-
-                <CardContent className="space-y-3">
-                  {overview.onboardingChecklist.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between rounded-2xl border border-border/60 px-4 py-3"
-                    >
-                      <span className="text-sm">{item.label}</span>
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium",
-                          item.done
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
-                            : "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
-                        )}
-                      >
-                        {item.done ? (
-                          <CheckCircle2 className="size-3.5" />
-                        ) : (
-                          <Clock3 className="size-3.5" />
-                        )}
-                        {item.done ? "Concluido" : "Pendente"}
-                      </span>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </div>
-          )}
+      {availableTabs.length > 1 && (
+        <div className="rounded-2xl border border-border/60 bg-background/70 p-2">
+          <div className="flex flex-wrap gap-2">
+            {availableTabs.map((tab) => (
+              <TabButton
+                key={tab.id}
+                active={activeTab === tab.id}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </TabButton>
+            ))}
+          </div>
+        </div>
+      )}
 
           {activeTab === "issue" && canIssueCharges && (
             <Card className="rounded-3xl border border-border/60">
@@ -1784,43 +1174,44 @@ export default function BillingPage() {
               </Card>
             </div>
           )}
-        </>
-      )}
     </div>
   );
 }
 
-function ModeBanner({
-  overview,
-  statusTone,
-  userRole,
-}: {
-  overview: BillingOverviewResponse;
-  statusTone: string;
-  userRole?: UserRole;
-}) {
+/** Situação do gateway para o ADMIN, com atalho para a configuração. */
+function GatewayBanner() {
+  const router = useRouter();
+  const { gateway, loading } = useBillingGateway();
+
+  if (loading || !gateway) {
+    return null;
+  }
+
+  const status = gatewayStatusMeta[gateway.status];
+  const isAsaas = gateway.gateway === "ASAAS";
+
   return (
-    <Card className={`overflow-hidden border ${statusTone}`}>
-      <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm font-medium">
+    <Card className="overflow-hidden border border-border/60">
+      <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
             <Wallet className="size-4 text-[#ff5c00]" />
-            <span>
-              Modo atual:{" "}
-              {overview.settings.usePlatformGateway
-                ? "Gateway da plataforma"
-                : "Gateway externo"}
-            </span>
+            Gateway: {isAsaas ? "Asaas" : "Próprio"}
+            <StatusBadge tone={status.tone} dot>
+              {status.label}
+            </StatusBadge>
           </div>
           <p className="text-sm text-muted-foreground">
-            Perfil atual: {roleLabels[userRole ?? "USER"] ?? userRole}. Status do
-            onboarding: {formatStatus(overview.settings.onboardingStatus)}.
+            {isAsaas
+              ? gateway.readyToIssue
+                ? "Integração pronta. A emissão pelo Asaas chega nas próximas etapas."
+                : `Falta: ${gateway.pendingSteps.join(" ")}`
+              : "Os boletos seguem pelo processo próprio da empresa, sem chamadas ao Asaas."}
           </p>
         </div>
-
-        <div className="rounded-2xl border border-border/60 bg-background/80 px-4 py-3 text-sm text-muted-foreground">
-          Ultima atualizacao: {formatDateTime(overview.settings.updatedAt)}
-        </div>
+        <GhostButton onClick={() => router.push("/dashboard/billing/settings")}>
+          Configurar gateway
+        </GhostButton>
       </CardContent>
     </Card>
   );

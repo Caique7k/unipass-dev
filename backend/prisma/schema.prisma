@@ -21,9 +21,23 @@ enum CompanyPlan {
   SCALE
 }
 
+// Como a empresa emite as cobranças: processo/gateway próprio (fora do
+// UniPass) ou a própria conta Asaas, com a chave dela guardada criptografada.
 enum BillingGatewayMode {
   EXTERNAL
-  PLATFORM_GATEWAY
+  ASAAS
+}
+
+// Resultado do último "Testar conexão" com a chave Asaas salva.
+enum AsaasConnectionCheck {
+  UNTESTED
+  VALIDATED
+  FAILED
+}
+
+enum BillingAuditOutcome {
+  SUCCESS
+  FAILURE
 }
 
 enum BillingOnboardingStatus {
@@ -58,6 +72,7 @@ enum BillingChargeStatus {
   OVERDUE
   CANCELLED
   FAILED
+  REFUNDED
 }
 
 enum BillingEventSource {
@@ -115,6 +130,7 @@ model User {
   notificationPrompts NotificationPrompt[]
   pushSubscriptions   PushSubscription[]
   ownedBillingCharges BillingCharge[]        @relation("BillingChargeOwner")
+  billingAuditLogs    BillingEventLog[]      @relation("BillingAuditActor")
   rfidCaptures        RfidCaptureSession[]
 
   createdAt DateTime @default(now())
@@ -472,8 +488,26 @@ model CompanyBillingSettings {
   reviewedAt              DateTime?
   reviewNotes             String?
   asaasAccountId          String?                 @unique
-  createdAt               DateTime                @default(now())
-  updatedAt               DateTime                @updatedAt
+
+  // Asaas da própria empresa. A chave nunca sai do backend: fica cifrada
+  // (billing-crypto.util.ts) e só os 4 últimos caracteres vão para a tela.
+  asaasApiKeyEncrypted       String?
+  asaasApiKeyLast4           String?
+  asaasEnvironment           String?
+  asaasConnectionCheck       AsaasConnectionCheck @default(UNTESTED)
+  asaasConnectionCheckedAt   DateTime?
+  asaasConnectionError       String?
+  asaasAccountName           String?
+  asaasAccountDocumentMasked String?
+  // Webhook: a URL leva uma chave aleatória (não o id da empresa) e o token
+  // que o Asaas manda em "asaas-access-token" é guardado só como hash.
+  asaasWebhookEndpointKey    String?              @unique
+  asaasWebhookTokenHash      String?
+  asaasWebhookId             String?
+  asaasWebhookConfiguredAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([gatewayMode, onboardingStatus])
 }
@@ -575,7 +609,15 @@ model BillingEventLog {
   processedAt      DateTime?
   createdAt        DateTime           @default(now())
 
+  // Trilha de auditoria das ações financeiras (source MANUAL): quem fez,
+  // deu certo ou não, e de qual IP. Nunca guarda chave, token ou documento.
+  actorUserId String?
+  actorUser   User?                @relation("BillingAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  outcome     BillingAuditOutcome?
+  ip          String?
+
   @@index([companyId, createdAt])
+  @@index([companyId, eventType, createdAt])
   @@index([chargeId, createdAt])
   @@index([customerId, createdAt])
 }

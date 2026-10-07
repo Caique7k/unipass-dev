@@ -3,7 +3,7 @@ import {
   Controller,
   HttpCode,
   Get,
-  Patch,
+  Param,
   Post,
   Query,
   Req,
@@ -19,7 +19,7 @@ import { BillingService } from './billing.service';
 import { BillingWebhookService } from './billing-webhook.service';
 import { FindBillingChargesDto } from './dto/find-billing-charges.dto';
 import { IssueBillingChargesDto } from './dto/issue-billing-charges.dto';
-import { UpdateCompanyBillingSettingsDto } from './dto/update-company-billing-settings.dto';
+import { AsaasWebhookParamsDto } from './dto/billing-gateway.dto';
 
 type AuthenticatedRequest = Request & {
   user: {
@@ -52,7 +52,25 @@ export class BillingController {
       payload,
       headers: req.headers,
       rawBody: req.rawBody,
-      remoteIp: req.ip ?? req.socket?.remoteAddress ?? null,
+      remoteIp: req.ip ?? null,
+    });
+  }
+
+  /** Webhook da conta Asaas de uma empresa (URL gerada em /billing/gateway). */
+  @Public()
+  @HttpCode(200)
+  @Post('webhook/asaas/:endpointKey')
+  handleCompanyAsaasWebhook(
+    @Req() req: BillingWebhookRequest,
+    @Param() params: AsaasWebhookParamsDto,
+    @Body() payload: Record<string, unknown>,
+  ) {
+    return this.billingWebhookService.handleCompanyAsaasWebhook({
+      endpointKey: params.endpointKey,
+      payload,
+      headers: req.headers,
+      rawBody: req.rawBody,
+      remoteIp: req.ip ?? null,
     });
   }
 
@@ -92,20 +110,5 @@ export class BillingController {
     @Body() dto: IssueBillingChargesDto,
   ) {
     return this.billingService.issueCharges(req.user.companyId, dto);
-  }
-
-  @Patch('settings')
-  @Roles('ADMIN')
-  updateSettings(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: UpdateCompanyBillingSettingsDto,
-  ) {
-    return this.billingService.updateCompanySettings(req.user.companyId, dto);
-  }
-
-  @Post('settings/submit-onboarding')
-  @Roles('ADMIN')
-  submitOnboarding(@Req() req: AuthenticatedRequest) {
-    return this.billingService.submitOnboarding(req.user.companyId);
   }
 }

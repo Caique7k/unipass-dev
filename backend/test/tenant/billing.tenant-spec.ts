@@ -1,4 +1,4 @@
-import { BillingOnboardingStatus, UserRole } from '@prisma/client';
+import { BillingGatewayMode, UserRole } from '@prisma/client';
 import {
   expectClientError,
   expectCompaniesUnchanged,
@@ -43,7 +43,7 @@ describe('Isolamento entre empresas — financeiro', () => {
       expect(overview.charges.map((charge) => charge.id)).toEqual([
         ctx.a.charge.id,
       ]);
-      expect(overview.settings.legalDocument).toBe(ctx.a.cnpj);
+      expect(overview.gateway).toBe(BillingGatewayMode.EXTERNAL);
       expectNoDataFrom(overview, ctx.b);
     });
 
@@ -133,34 +133,202 @@ describe('Isolamento entre empresas — financeiro', () => {
         }),
       ).resolves.toBe(2);
     });
+  });
 
-    it('alterar a configuração financeira de A não mexe na de B', async () => {
-      const settings = await bUnchanged(() =>
-        billing().updateCompanySettings(ctx.a.companyId, {
-          legalEntityName: 'Nova Razão Alfa',
-          bankInfoSummary: 'Novo Banco Alfa',
-        }),
-      );
+  describe('gateway de cobrança (Asaas da própria empresa)', () => {
+    const gateway = () => ctx.services.billingGateway;
+    const asaas = () => ctx.services.asaas;
+    const KEY_A = '$aact_hmlg_chave_de_teste_da_empresa_alfa_0001';
+    const KEY_B = '$aact_hmlg_chave_de_teste_da_empresa_bravo_0002';
+    const actorOf = (tenant: typeof ctx.a) => ({
+      id: tenant.users.admin.id,
+      email: tenant.users.admin.email,
+      companyId: tenant.companyId,
+      ip: null,
+    });
+    // B com Asaas completo: chave salva e testada, webhook configurado.
+    const configureB = async () => {
+      await gateway().setGateway(actorOf(ctx.b), BillingGatewayMode.ASAAS);
+      await gateway().saveCredentials(actorOf(ctx.b), KEY_B);
+      const { webhookSetup } = await gateway().configureWebhook(actorOf(ctx.b));
+      asaas().reset();
+      return webhookSetup;
+    };
 
-      expect(settings.legalEntityName).toBe('Nova Razão Alfa');
-      expectNoDataFrom(settings, ctx.b);
+    it('a configuração de A não traz nada de B e nunca devolve chave', async () => {
+      await configureB();
+      await gateway().saveCredentials(actorOf(ctx.a), KEY_A);
+      const view = await gateway().getGateway(ctx.a.companyId);
+      const text = JSON.stringify(view);
+
+      expect(view.asaas.apiKeyLast4).toBe(KEY_A.slice(-4));
+      expect(text).not.toContain(KEY_A);
+      expect(text).not.toContain(KEY_B);
+      expect(text).not.toContain(KEY_B.slice(-4));
+      expectNoDataFrom(view, ctx.b);
     });
 
-    it('enviar o onboarding de A não mexe no de B', async () => {
-      const settings = await bUnchanged(async () => {
-        await billing().updateCompanySettings(ctx.a.companyId, {
-          usePlatformGateway: true,
-          lgpdAccepted: true,
-          platformTermsAccepted: true,
-        });
-
-        return billing().submitOnboarding(ctx.a.companyId);
+    it('a chave fica cifrada no banco e o webhook guarda só o hash do token', async () => {
+      const webhookSetup = await configureB();
+      const stored = await ctx.prisma.companyBillingSettings.findUniqueOrThrow({
+        where: { companyId: ctx.b.companyId },
       });
 
-      expect(settings.onboardingStatus).toBe(
-        BillingOnboardingStatus.UNDER_REVIEW,
+      expect(stored.asaasApiKeyEncrypted).toBeTruthy();
+      expect(stored.asaasApiKeyEncrypted).not.toContain(KEY_B);
+      expect(stored.asaasWebhookTokenHash).not.toBe(webhookSetup.authToken);
+      expect(JSON.stringify(stored)).not.toContain(
+        webhookSetup.authToken as string,
       );
-      expectNoDataFrom(settings, ctx.b);
+    });
+
+    it('salvar, testar, configurar webhook e remover em A não mexe em B nem usa a chave de B', async () => {
+      await configureB();
+
+      await bUnchanged(async () => {
+        await gateway().setGateway(actorOf(ctx.a), BillingGatewayMode.ASAAS);
+        await gateway().saveCredentials(actorOf(ctx.a), KEY_A);
+        await gateway().testConnection(actorOf(ctx.a));
+        await gateway().configureWebhook(actorOf(ctx.a));
+        await gateway().removeCredentials(actorOf(ctx.a));
+      });
+
+      expect(asaas().keysUsed).not.toContain(KEY_B);
+      expect(asaas().keysUsed.every((key) => key === KEY_A)).toBe(true);
+    });
+
+    it('testar a conexão em A sem chave dá 400 mesmo com B configurada', async () => {
+      await configureB();
+
+      const error = await nothingChanges(() =>
+        expectClientError(gateway().testConnection(actorOf(ctx.a))),
+      );
+
+      expect(error.getStatus()).toBe(400);
+      expect(asaas().keysUsed).toEqual([]);
+      expectNoDataFrom(error, ctx.b);
+    });
+
+    it('a auditoria de A fica em A e sem a chave', async () => {
+      await gateway().saveCredentials(actorOf(ctx.a), KEY_A);
+      const logs = await ctx.prisma.billingEventLog.findMany({
+        where: { source: 'MANUAL' },
+      });
+
+      expect(logs.length).toBeGreaterThan(0);
+      expect(logs.every((log) => log.companyId === ctx.a.companyId)).toBe(true);
+      expect(JSON.stringify(logs)).not.toContain(KEY_A);
+    });
+  });
+
+  describe('webhook do Asaas por empresa', () => {
+    const gateway = () => ctx.services.billingGateway;
+    const receiver = () => ctx.services.billingWebhookReceiver;
+    const actorOf = (tenant: typeof ctx.a) => ({
+      id: tenant.users.admin.id,
+      email: tenant.users.admin.email,
+      companyId: tenant.companyId,
+      ip: null,
+    });
+    const setupWebhook = async (tenant: typeof ctx.a) => {
+      await gateway().saveCredentials(
+        actorOf(tenant),
+        `$aact_hmlg_chave_de_teste_${tenant.companyId.replace(/-/g, '')}`,
+      );
+      const { webhookSetup } = await gateway().configureWebhook(
+        actorOf(tenant),
+      );
+      const endpointKey = webhookSetup.path.split('/').pop() as string;
+      return { endpointKey, token: webhookSetup.authToken as string };
+    };
+    const send = (
+      endpoint: { endpointKey: string; token: string },
+      payload: Record<string, unknown>,
+    ) =>
+      receiver().handleCompanyAsaasWebhook({
+        endpointKey: endpoint.endpointKey,
+        payload,
+        headers: { 'asaas-access-token': endpoint.token },
+        remoteIp: '127.0.0.1',
+      });
+
+    it('pagamento recebido na URL de A com o id da cobrança de B não altera B', async () => {
+      await ctx.prisma.billingCharge.update({
+        where: { id: ctx.b.charge.id },
+        data: { gatewayChargeId: 'pay_bravo_1' },
+      });
+      const endpointA = await setupWebhook(ctx.a);
+
+      await bUnchanged(async () => {
+        await send(endpointA, {
+          id: 'evt_cross_1',
+          event: 'PAYMENT_RECEIVED',
+          dateCreated: '2026-10-06 10:00:00',
+          payment: {
+            id: 'pay_bravo_1',
+            status: 'RECEIVED',
+            externalReference: ctx.b.charge.externalReference,
+            paymentDate: '2026-10-06',
+          },
+        });
+        const log = await ctx.prisma.billingEventLog.findFirstOrThrow({
+          where: { source: 'WEBHOOK' },
+        });
+        await receiver().processWebhookEventLog(log.id);
+      });
+
+      const log = await ctx.prisma.billingEventLog.findFirstOrThrow({
+        where: { source: 'WEBHOOK' },
+      });
+      expect(log.companyId).toBe(ctx.a.companyId);
+      expect(log.chargeId).toBeNull();
+    });
+
+    it('o token de A na URL de B dá 401 e nada é gravado', async () => {
+      const endpointA = await setupWebhook(ctx.a);
+      const endpointB = await setupWebhook(ctx.b);
+
+      const error = await nothingChanges(() =>
+        expectClientError(
+          send(
+            { endpointKey: endpointB.endpointKey, token: endpointA.token },
+            { id: 'evt_x', event: 'PAYMENT_RECEIVED', payment: {} },
+          ),
+        ),
+      );
+
+      expect(error.getStatus()).toBe(401);
+    });
+
+    it('pagamento recebido na URL de A atualiza só a cobrança de A', async () => {
+      await ctx.prisma.billingCharge.update({
+        where: { id: ctx.a.charge.id },
+        data: { gatewayChargeId: 'pay_alfa_1' },
+      });
+      const endpointA = await setupWebhook(ctx.a);
+
+      await bUnchanged(async () => {
+        await send(endpointA, {
+          id: 'evt_alfa_1',
+          event: 'PAYMENT_RECEIVED',
+          dateCreated: '2026-10-06 10:00:00',
+          payment: {
+            id: 'pay_alfa_1',
+            status: 'RECEIVED',
+            paymentDate: '2026-10-06',
+          },
+        });
+        const log = await ctx.prisma.billingEventLog.findFirstOrThrow({
+          where: { source: 'WEBHOOK' },
+        });
+        await receiver().processWebhookEventLog(log.id);
+      });
+
+      await expect(
+        ctx.prisma.billingCharge.findUniqueOrThrow({
+          where: { id: ctx.a.charge.id },
+        }),
+      ).resolves.toMatchObject({ status: 'PAID' });
     });
   });
 
@@ -261,15 +429,32 @@ describe('Isolamento entre empresas — financeiro', () => {
       role: UserRole.PLATFORM_ADMIN,
     });
 
-    it('visão geral, cobranças, emissão, configuração e onboarding são recusados', async () => {
+    it('visão geral, cobranças, emissão e gateway são recusados', async () => {
+      const gateway = ctx.services.billingGateway;
+      const noCompanyActor = {
+        id: ctx.platformAdmin.id,
+        email: ctx.platformAdmin.email,
+        companyId: null,
+        ip: null,
+      };
+
       await nothingChanges(async () => {
         await expectClientError(billing().getOverview(platformUser()));
         await expectClientError(billing().findCharges(platformUser()));
         await expectClientError(billing().issueCharges(null, DECEMBER));
+        await expectClientError(gateway.getGateway(null));
         await expectClientError(
-          billing().updateCompanySettings(null, { legalEntityName: 'X' }),
+          gateway.setGateway(noCompanyActor, BillingGatewayMode.ASAAS),
         );
-        await expectClientError(billing().submitOnboarding(null));
+        await expectClientError(
+          gateway.saveCredentials(
+            noCompanyActor,
+            '$aact_hmlg_chave_de_teste_sem_empresa_0003',
+          ),
+        );
+        await expectClientError(gateway.testConnection(noCompanyActor));
+        await expectClientError(gateway.configureWebhook(noCompanyActor));
+        await expectClientError(gateway.removeCredentials(noCompanyActor));
       });
     });
 
