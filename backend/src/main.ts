@@ -12,6 +12,7 @@ import { configureHttpSecurity } from './security/http-security';
 import { OpaqueIdRequestInterceptor } from './security/opaque-id-request.interceptor';
 import { OpaqueIdResponseInterceptor } from './security/opaque-id-response.interceptor';
 import { SecurityThrottlerGuard } from './security/security-throttler.guard';
+import { parseTrustProxyHops } from './security/trust-proxy.util';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -26,7 +27,12 @@ async function bootstrap() {
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   app.use(cookieParser());
-  configureHttpSecurity(app, { allowedOrigins });
+  configureHttpSecurity(app, {
+    allowedOrigins,
+    trustProxyHops: parseTrustProxyHops(
+      configService.get<string>('TRUST_PROXY_HOPS'),
+    ),
+  });
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

@@ -5,6 +5,8 @@ import { buildCorsOptions } from './cors-options.util';
 export type HttpSecurityOptions = {
   /** Origens de FRONTEND_URLS, já normalizadas (parseAllowedOrigins). */
   allowedOrigins: readonly string[];
+  /** TRUST_PROXY_HOPS já lido (parseTrustProxyHops). 0 = desligado. */
+  trustProxyHops: number;
 };
 
 /**
@@ -18,6 +20,13 @@ export function configureHttpSecurity(
 ) {
   // O Express nem gera o cabeçalho; o helmet também o apagaria.
   app.disable('x-powered-by');
+
+  // Com N proxies, req.ip (e req.ips[0], usado pelo SecurityThrottlerGuard)
+  // passa a ser o IP anotado pelo proxy mais externo. Desligado, o
+  // X-Forwarded-For é ignorado e vale o IP da conexão.
+  if (options.trustProxyHops > 0) {
+    app.set('trust proxy', options.trustProxyHops);
+  }
 
   // Padrão do helmet. A API só devolve JSON e o painel só a chama por
   // fetch/axios com CORS: Cross-Origin-Resource-Policy só vale para cargas
