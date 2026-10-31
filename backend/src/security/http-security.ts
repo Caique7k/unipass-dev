@@ -1,4 +1,5 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
 import { buildCorsOptions } from './cors-options.util';
 
 export type HttpSecurityOptions = {
@@ -15,5 +16,14 @@ export function configureHttpSecurity(
   app: NestExpressApplication,
   options: HttpSecurityOptions,
 ) {
+  // O Express nem gera o cabeçalho; o helmet também o apagaria.
+  app.disable('x-powered-by');
+
+  // Padrão do helmet. A API só devolve JSON e o painel só a chama por
+  // fetch/axios com CORS: Cross-Origin-Resource-Policy só vale para cargas
+  // sem CORS (img, iframe), CSP/COOP/X-Frame-Options só para respostas
+  // abertas como página, e HSTS só em HTTPS.
+  app.use(helmet());
+
   app.enableCors(buildCorsOptions(options.allowedOrigins));
 }
