@@ -1,19 +1,36 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import type { StringValue } from 'ms';
 import { OpaqueIdService } from 'src/security/opaque-id.service';
-import { verifyPassword } from './password-hash.util';
+import { createDummyPasswordHash, verifyPassword } from './password-hash.util';
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
+  private dummyPasswordHash?: Promise<string>;
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
     private readonly opaqueIdService: OpaqueIdService,
   ) {}
+
+  // O Nest espera este passo antes de aceitar requisições: o primeiro login
+  // com e-mail inexistente não paga a geração do hash falso.
+  async onModuleInit() {
+    await this.getDummyPasswordHash();
+  }
+
+  private getDummyPasswordHash() {
+    this.dummyPasswordHash ??= createDummyPasswordHash();
+    return this.dummyPasswordHash;
+  }
 
   private getTokenExpiration(rememberMe: boolean) {
     if (rememberMe) {
@@ -42,13 +59,15 @@ export class AuthService {
       },
     });
 
-    if (!user || !user.active) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    // Exatamente uma comparação em toda tentativa (usuário ativo, inativo ou
+    // inexistente), para a resposta levar o mesmo tempo nos três casos. A
+    // decisão vem só depois, e exige um usuário real e ativo.
+    const passwordMatch = await verifyPassword(
+      password,
+      user?.password ?? (await this.getDummyPasswordHash()),
+    );
 
-    const passwordMatch = await verifyPassword(password, user.password);
-
-    if (!passwordMatch) {
+    if (!user || !user.active || !passwordMatch) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
