@@ -1,21 +1,21 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { CookieOriginGuard } from './security/cookie-origin.guard';
-import {
-  normalizeOrigin,
-  parseAllowedOrigins,
-} from './security/allowed-origins.util';
+import { parseAllowedOrigins } from './security/allowed-origins.util';
+import { configureHttpSecurity } from './security/http-security';
 import { OpaqueIdRequestInterceptor } from './security/opaque-id-request.interceptor';
 import { OpaqueIdResponseInterceptor } from './security/opaque-id-response.interceptor';
 import { SecurityThrottlerGuard } from './security/security-throttler.guard';
+import { parseTrustProxyHops } from './security/trust-proxy.util';
 
 async function bootstrap() {
-  const app = await NestFactory.create<INestApplication>(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
   const configService = app.get(ConfigService);
@@ -27,24 +27,11 @@ async function bootstrap() {
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-call
   app.use(cookieParser());
-  app.enableCors({
-    origin: (
-      origin: string | undefined,
-      callback: (error: Error | null, allow?: boolean) => void,
-    ) => {
-      const normalizedOrigin = normalizeOrigin(origin);
-
-      if (
-        !origin ||
-        (normalizedOrigin && allowedOrigins.includes(normalizedOrigin))
-      ) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error('Origin not allowed by CORS'));
-    },
-    credentials: true,
+  configureHttpSecurity(app, {
+    allowedOrigins,
+    trustProxyHops: parseTrustProxyHops(
+      configService.get<string>('TRUST_PROXY_HOPS'),
+    ),
   });
   app.useGlobalPipes(
     new ValidationPipe({

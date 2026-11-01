@@ -16,6 +16,7 @@ Por padrao a API sobe em `http://localhost:4000`.
 ## Variaveis importantes
 
 - `FRONTEND_URLS`: lista separada por virgula com os dominios autorizados no CORS.
+- `TRUST_PROXY_HOPS`: quantos proxies (nginx, load balancer, Cloudflare...) ficam entre a internet e a API, para o `req.ip` ser o IP real do cliente (limite de requisicoes e allowlist do webhook). Vazio ou `0` = desligado (padrao); so defina atras de proxy, com o numero exato.
 - `APP_TIMEZONE`: timezone oficial usada para calcular dia/horario das notificacoes.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`: configuracao da fila BullMQ.
 - `NOTIFICATION_WORKER_CONCURRENCY`: quantidade de jobs processados em paralelo pelo worker.
@@ -30,7 +31,7 @@ Por padrao a API sobe em `http://localhost:4000`.
 - `ASAAS_WEBHOOK_PUBLIC_BASE_URL`: opcional. Endereco publico https da API (ex.: `https://api.seudominio.com`). Com ela, o botao "Cadastrar webhook" registra o webhook direto na conta Asaas da empresa; sem ela, a tela mostra URL + token para cadastro manual.
 - `ASAAS_API_KEY`: nao e usada em tempo de execucao (cada empresa salva a propria chave pela tela "Gateway de cobranca").
 - `ASAAS_WEBHOOK_TOKEN`: so para a rota legada `POST /billing/webhook/asaas`. Sem ela, a rota legada recusa tudo (401). A rota por empresa (`/billing/webhook/asaas/:endpointKey`) usa o token gerado na tela.
-- `ASAAS_WEBHOOK_IP_WHITELIST`: lista separada por virgula com IPs autorizados a chamar os webhooks. Usa o IP da conexao (`req.ip`); atras de proxy, configure `trust proxy` antes de ligar.
+- `ASAAS_WEBHOOK_IP_WHITELIST`: lista separada por virgula com IPs autorizados a chamar os webhooks. Usa o IP da conexao (`req.ip`); atras de proxy, configure `TRUST_PROXY_HOPS` antes de ligar.
 - `COOKIE_SECURE`: use `true` em producao com HTTPS.
 - `COOKIE_SAME_SITE`: use `none` quando frontend e backend estiverem em dominios diferentes e com HTTPS.
 - `COOKIE_DOMAIN`: defina apenas se voce realmente precisar compartilhar cookie entre subdominios.
