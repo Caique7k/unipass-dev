@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Prisma, UserRole } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { hashPassword } from '../auth/password-hash.util';
 
 const userStudentSelect = {
   id: true,
@@ -131,7 +131,7 @@ export class UsersService {
 
     await this.ensureCompanyEmailAvailability(identity.email, company.id);
 
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const hashedPassword = await hashPassword(dto.password);
 
     try {
       return await this.prisma.user.create({
@@ -223,7 +223,7 @@ export class UsersService {
     };
 
     if (dto.password) {
-      data.password = await bcrypt.hash(dto.password, 10);
+      data.password = await hashPassword(dto.password);
     }
 
     try {
