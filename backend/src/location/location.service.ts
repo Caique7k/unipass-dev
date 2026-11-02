@@ -87,6 +87,7 @@ export class LocationService {
       select: liveLocationDeviceSelect,
     });
 
+    // Nenhum UniHub ativo no ônibus.
     if (!linkedDevice) {
       return {
         bus,
@@ -96,38 +97,10 @@ export class LocationService {
       };
     }
 
-    if (!linkedDevice.active) {
-      return {
-        bus,
-        linkedDevice: null,
-        state: 'needs-pairing',
-        telemetry: null,
-      };
-    }
+    const { lastLat, lastLng, lastUpdate } = linkedDevice;
 
-    const hasCoordinates =
-      linkedDevice.lastLat !== null && linkedDevice.lastLng !== null;
-
-    const isOnline =
-      linkedDevice.lastUpdate &&
-      Date.now() - new Date(linkedDevice.lastUpdate).getTime() <=
-        DEVICE_ONLINE_THRESHOLD_MS &&
-      hasCoordinates;
-
-    if (hasCoordinates && linkedDevice.lastUpdate) {
-      return {
-        bus,
-        linkedDevice,
-        state: isOnline ? 'live' : 'stale',
-        telemetry: {
-          latitude: linkedDevice.lastLat,
-          longitude: linkedDevice.lastLng,
-          lastUpdate: linkedDevice.lastUpdate,
-        },
-      };
-    }
-
-    if (!isOnline) {
+    // O UniHub ainda não mandou posição.
+    if (lastLat === null || lastLng === null || !lastUpdate) {
       return {
         bus,
         linkedDevice,
@@ -136,11 +109,18 @@ export class LocationService {
       };
     }
 
+    const isOnline =
+      Date.now() - lastUpdate.getTime() <= DEVICE_ONLINE_THRESHOLD_MS;
+
     return {
       bus,
       linkedDevice,
-      state: 'live',
-      telemetry: null,
+      state: isOnline ? 'live' : 'stale',
+      telemetry: {
+        latitude: lastLat,
+        longitude: lastLng,
+        lastUpdate,
+      },
     };
   }
 }
