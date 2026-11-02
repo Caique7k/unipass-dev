@@ -1,6 +1,6 @@
 import { Controller, Post, Body, UseGuards, Get, Req } from '@nestjs/common';
 import { TransportService } from './transport.service';
-import { JwtAuthGuard } from 'src/auth/dto/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { Roles } from 'src/auth/roles.decorator';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { BoardingDto } from './dto/boarding.dto';
