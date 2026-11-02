@@ -71,15 +71,23 @@ export class LocationService {
       throw new NotFoundException('Onibus nao encontrado');
     }
 
+    // Com mais de um UniHub no ônibus, vale o ativo com a telemetria mais
+    // recente. Sem o nulls: 'last', o PostgreSQL põe primeiro quem nunca
+    // mandou posição (lastUpdate nulo), e ele esconderia o que está mandando.
     const linkedDevice = await this.prisma.device.findFirst({
       where: {
         companyId,
         busId,
+        active: true,
       },
-      orderBy: [{ lastUpdate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [
+        { lastUpdate: { sort: 'desc', nulls: 'last' } },
+        { createdAt: 'desc' },
+      ],
       select: liveLocationDeviceSelect,
     });
 
+    // Nenhum UniHub ativo no ônibus.
     if (!linkedDevice) {
       return {
         bus,
@@ -89,38 +97,10 @@ export class LocationService {
       };
     }
 
-    if (!linkedDevice.active) {
-      return {
-        bus,
-        linkedDevice: null,
-        state: 'needs-pairing',
-        telemetry: null,
-      };
-    }
+    const { lastLat, lastLng, lastUpdate } = linkedDevice;
 
-    const hasCoordinates =
-      linkedDevice.lastLat !== null && linkedDevice.lastLng !== null;
-
-    const isOnline =
-      linkedDevice.lastUpdate &&
-      Date.now() - new Date(linkedDevice.lastUpdate).getTime() <=
-        DEVICE_ONLINE_THRESHOLD_MS &&
-      hasCoordinates;
-
-    if (hasCoordinates && linkedDevice.lastUpdate) {
-      return {
-        bus,
-        linkedDevice,
-        state: isOnline ? 'live' : 'stale',
-        telemetry: {
-          latitude: linkedDevice.lastLat,
-          longitude: linkedDevice.lastLng,
-          lastUpdate: linkedDevice.lastUpdate,
-        },
-      };
-    }
-
-    if (!isOnline) {
+    // O UniHub ainda não mandou posição.
+    if (lastLat === null || lastLng === null || !lastUpdate) {
       return {
         bus,
         linkedDevice,
@@ -129,11 +109,18 @@ export class LocationService {
       };
     }
 
+    const isOnline =
+      Date.now() - lastUpdate.getTime() <= DEVICE_ONLINE_THRESHOLD_MS;
+
     return {
       bus,
       linkedDevice,
-      state: 'live',
-      telemetry: null,
+      state: isOnline ? 'live' : 'stale',
+      telemetry: {
+        latitude: lastLat,
+        longitude: lastLng,
+        lastUpdate,
+      },
     };
   }
 }
