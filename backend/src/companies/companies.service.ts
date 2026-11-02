@@ -6,8 +6,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CompanyPlan, UserRole } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
+import { hashPassword } from '../auth/password-hash.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { safeCompareStrings } from 'src/security/secure-compare.util';
 import { CreateCompanyOnboardingDto } from './dto/create-company-onboarding.dto';
@@ -274,7 +274,7 @@ export class CompaniesService {
     );
     await this.ensureAdminEmailAvailability(normalizedAdminEmail);
 
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const hashedPassword = await hashPassword(dto.password);
 
     const company = await this.prisma.$transaction(async (tx) => {
       const createdCompany = await tx.company.create({
