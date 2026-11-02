@@ -81,10 +81,16 @@ export class AuthService implements OnModuleInit {
       companyName: user.company?.name ?? null,
     };
 
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: this.getTokenExpiration(rememberMe),
+    });
+    // O vencimento sai do próprio token assinado: quem guarda o token (o
+    // cookie do "manter conectado") vence no mesmo instante que ele.
+    const { exp } = this.jwtService.decode<{ exp: number }>(accessToken);
+
     return {
-      access_token: this.jwtService.sign(payload, {
-        expiresIn: this.getTokenExpiration(rememberMe),
-      }),
+      access_token: accessToken,
+      expiresAt: new Date(exp * 1000),
     };
   }
 
