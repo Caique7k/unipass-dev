@@ -1,0 +1,101 @@
+# CI do UniPass: testes do backend, suíte de banco e build do frontend em todo
+# PR para develop/main e em todo push na develop.
+#
+# Repositório público, que recebe PR de qualquer pessoa:
+# - só o evento pull_request (nunca pull_request_target): o código de um PR
+#   roda sem segredos e com um token que só lê o repositório;
+# - permissões mínimas (contents: read) e nenhum secret;
+# - só actions oficiais do GitHub, fixadas pelo SHA do commit (a tag de versão
+#   pode ser movida; o SHA não). A versão fica no comentário ao lado.
+# - Node 20, a mesma versão dos Dockerfiles do backend e do frontend.
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+# Commit novo no mesmo PR cancela a execução anterior. Na develop, cada push
+# roda até o fim, para cada commit ter o seu resultado.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # NÃO é segredo e não aponta para banco nenhum: o prisma.config.ts exige
+      # que a variável exista até para o `prisma generate`, que não conecta.
+      # Nenhum passo deste job usa banco.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci_sem_banco
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Instalar dependências (package-lock)
+        run: npm ci
+      - name: Gerar o Prisma Client
+        run: npx prisma generate
+      - name: Checar tipos (tsc)
+        run: npx tsc --noEmit --incremental false
+      - name: Testes (jest)
+        run: npx jest --ci
+
+  banco:
+    name: banco
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Sobe o Postgres descartável e o runner pelo docker-compose.test.yml
+      # (credenciais só de teste, banco em memória, sem porta publicada).
+      - name: Suíte de banco (Docker)
+        run: npm run test:tenant:docker
+      - name: Desligar o banco de teste
+        if: always()
+        run: npm run test:tenant:down
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Instalar dependências (package-lock)
+        run: npm ci
+      - name: Checar tipos (tsc)
+        run: npx tsc --noEmit --incremental false
+      - name: Build
+        run: npm run build
