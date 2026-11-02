@@ -71,12 +71,19 @@ export class LocationService {
       throw new NotFoundException('Onibus nao encontrado');
     }
 
+    // Com mais de um UniHub no ônibus, vale o ativo com a telemetria mais
+    // recente. Sem o nulls: 'last', o PostgreSQL põe primeiro quem nunca
+    // mandou posição (lastUpdate nulo), e ele esconderia o que está mandando.
     const linkedDevice = await this.prisma.device.findFirst({
       where: {
         companyId,
         busId,
+        active: true,
       },
-      orderBy: [{ lastUpdate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [
+        { lastUpdate: { sort: 'desc', nulls: 'last' } },
+        { createdAt: 'desc' },
+      ],
       select: liveLocationDeviceSelect,
     });
 
