@@ -46,19 +46,21 @@ export class AuthController {
     };
   }
 
-  private getCookieOptions(rememberMe: boolean): CookieOptions {
+  // Sem "manter conectado": cookie de sessão. Com: o cookie vence junto com o
+  // token. O maxAge (contado pelo navegador a partir do recebimento) não
+  // depende do relógio do computador do usuário; o Express também escreve o
+  // Expires, que cai no mesmo segundo do exp do token.
+  private getCookieOptions(
+    rememberMe: boolean,
+    tokenExpiresAt: Date,
+  ): CookieOptions {
     if (!rememberMe) {
       return this.getBaseCookieOptions();
     }
 
-    const maxAge = Number(
-      this.configService.get<string>('COOKIE_REMEMBER_MAX_AGE_MS') ??
-        `${1000 * 60 * 60 * 24 * 30}`,
-    );
-
     return {
       ...this.getBaseCookieOptions(),
-      maxAge,
+      maxAge: tokenExpiresAt.getTime() - Date.now(),
     };
   }
 
@@ -74,16 +76,17 @@ export class AuthController {
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { access_token } = await this.authService.login(
+    const rememberMe = dto.rememberMe ?? false;
+    const { access_token, expiresAt } = await this.authService.login(
       dto.email,
       dto.password,
-      dto.rememberMe ?? false,
+      rememberMe,
     );
 
     res.cookie(
       'token',
       access_token,
-      this.getCookieOptions(dto.rememberMe ?? false),
+      this.getCookieOptions(rememberMe, expiresAt),
     );
 
     return { success: true };

@@ -32,6 +32,7 @@ const hashMock = bcrypt.hash as unknown as jest.Mock<
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const COMPANY_ID = '22222222-2222-4222-8222-222222222222';
+const TOKEN_EXP = 1_900_000_000; // exp (em segundos) do token assinado
 const RIGHT_PASSWORD = 'senha-certa-123';
 const WRONG_PASSWORD = 'senha-errada-456';
 const INVALID_CREDENTIALS = {
@@ -83,7 +84,7 @@ describe('AuthService.login', () => {
     encode: jest.fn((value: string | null) => (value ? `opk_${value}` : null)),
   };
   let prisma: ReturnType<typeof buildPrisma>;
-  let jwt: { sign: jest.Mock };
+  let jwt: { sign: jest.Mock; decode: jest.Mock };
   let service: AuthService;
 
   beforeAll(async () => {
@@ -94,7 +95,10 @@ describe('AuthService.login', () => {
     compareMock.mockClear();
     hashMock.mockClear();
     prisma = buildPrisma();
-    jwt = { sign: jest.fn().mockReturnValue('jwt-assinado') };
+    jwt = {
+      sign: jest.fn().mockReturnValue('jwt-assinado'),
+      decode: jest.fn().mockReturnValue({ exp: TOKEN_EXP }),
+    };
     service = new AuthService(
       prisma as unknown as PrismaService,
       jwt as unknown as JwtService,
@@ -182,10 +186,15 @@ describe('AuthService.login', () => {
     expect(jwt.sign).not.toHaveBeenCalled();
   });
 
-  it('login correto devolve o token, com ids opacos no payload e expiração de 1h', async () => {
+  it('login correto devolve o token e o vencimento dele, com ids opacos no payload e expiração de 1h', async () => {
     const result = await service.login('admin@alfa.test', RIGHT_PASSWORD);
 
-    expect(result).toEqual({ access_token: 'jwt-assinado' });
+    // O vencimento vem do exp do próprio token assinado.
+    expect(result).toEqual({
+      access_token: 'jwt-assinado',
+      expiresAt: new Date(TOKEN_EXP * 1000),
+    });
+    expect(jwt.decode).toHaveBeenCalledWith('jwt-assinado');
     expect(compareMock).toHaveBeenCalledTimes(1);
     expect(jwt.sign).toHaveBeenCalledWith(
       {
