@@ -1,5 +1,7 @@
 # UniPass
 
+[![CI](https://github.com/Caique7k/unipass-dev/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Caique7k/unipass-dev/actions/workflows/ci.yml)
+
 Plataforma criada para resolver um problema real de operação no transporte: conectar gestão, rastreamento e controle de acesso em uma experiência simples, segura e preparada para escalar.
 
 > A proposta do UniPass é transformar processos espalhados em uma plataforma única, capaz de centralizar operação, monitoramento e tomada de decisão.
@@ -148,6 +150,31 @@ mindmap
       Autenticação
       Mobile
 ```
+
+## CI
+
+O GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) roda em todo pull request para `develop` e `main` e em todo push na `develop`. São três verificações, em paralelo:
+
+- **backend**: `npm ci`, `npx prisma generate`, `npx tsc --noEmit --incremental false` e `npx jest`;
+- **banco**: a suíte com banco de verdade (`npm run test:tenant:docker`, que sobe um PostgreSQL descartável pelo `docker-compose.test.yml`);
+- **frontend**: `npm ci`, `npx tsc --noEmit --incremental false` e `npm run build`.
+
+Um pull request só deve entrar com as três verdes. Para rodar o mesmo na sua máquina:
+
+```bash
+# backend/ (a suíte de banco precisa do Docker aberto)
+npx prisma generate
+npx tsc --noEmit --incremental false
+npx jest
+npm run test:tenant:docker
+npm run test:tenant:down
+
+# frontend/
+npx tsc --noEmit --incremental false
+npm run build
+```
+
+O lint ainda não faz parte do CI.
 
 ## Próximos Passos
 
