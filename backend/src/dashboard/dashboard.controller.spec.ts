@@ -171,10 +171,28 @@ describe('DashboardController — papéis e entrada', () => {
       ['data final incompleta', 'endDate=2026-10'],
       ['tipo de evento que não existe', 'eventType=QUALQUER'],
       ['situação de aluno que não existe', 'studentStatus=talvez'],
+      ['data inicial com mês e dia que não existem', 'startDate=2026-13-45'],
+      ['data inicial em 30 de fevereiro', 'startDate=2026-02-30'],
+      [
+        'data final em 29 de fevereiro de ano não bissexto',
+        'endDate=2026-02-29',
+      ],
     ])('%s dá 400 e nenhum relatório é montado', async (_case, query) => {
       await getAs('ADMIN', `/dashboard/reports?${query}`).expect(400);
 
       expect(dashboardService.getReport).not.toHaveBeenCalled();
+    });
+
+    it('29 de fevereiro de ano bissexto é data válida e chega ao service', async () => {
+      await getAs(
+        'ADMIN',
+        '/dashboard/reports?startDate=2024-02-29&endDate=2024-02-29',
+      ).expect(200);
+
+      expect(dashboardService.getReport).toHaveBeenCalledWith(COMPANY_ID, {
+        startDate: '2024-02-29',
+        endDate: '2024-02-29',
+      });
     });
   });
 });

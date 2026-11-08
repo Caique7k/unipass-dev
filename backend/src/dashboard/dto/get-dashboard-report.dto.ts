@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsIn,
+  IsISO8601,
   IsOptional,
   IsString,
   Matches,
@@ -45,14 +46,18 @@ export class GetDashboardReportDto {
   @IsIn(DASHBOARD_REPORT_TYPES)
   reportType?: DashboardReportType;
 
+  // @Matches exige AAAA-MM-DD exato; @IsISO8601 strict recusa dia que não
+  // existe (2026-02-30, 2026-02-29).
   @IsOptional()
   @Transform(trimString)
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  @IsISO8601({ strict: true })
   startDate?: string;
 
   @IsOptional()
   @Transform(trimString)
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  @IsISO8601({ strict: true })
   endDate?: string;
 
   @IsOptional()
