@@ -222,4 +222,15 @@ describe('AuthController — cookie do login', () => {
 
     expect(tokenCookie(response)).toBeUndefined();
   });
+
+  it('e-mail com maiúsculas e espaços chega ao banco em minúsculas', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: '  Admin@ALFA.test ', password: PASSWORD })
+      .expect(201);
+
+    expect(prisma.user.findUnique).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { email: EMAIL } }),
+    );
+  });
 });
