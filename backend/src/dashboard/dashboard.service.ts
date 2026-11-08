@@ -2218,7 +2218,7 @@ export class DashboardService {
   }
 
   private formatPeriodLabel(startDate: string, endDate: string) {
-    return `Periodo ${this.formatDateKey(startDate)} ate ${this.formatDateKey(endDate)}`;
+    return `Período ${this.formatDateKey(startDate)} até ${this.formatDateKey(endDate)}`;
   }
 
   private getDateKey(date: Date) {
@@ -2231,9 +2231,9 @@ export class DashboardService {
 
   private formatEventType(type: EventType) {
     const labels: Record<EventType, string> = {
-      BOARDING: 'Boarding',
+      BOARDING: 'Embarque',
       DEBOARDING: 'Desembarque',
-      LEAVING: 'Saida',
+      LEAVING: 'Saída',
       DENIED: 'Negado',
     };
 

@@ -475,4 +475,38 @@ describe('DashboardService', () => {
       });
     });
   });
+
+  describe('rótulos do relatório', () => {
+    it('período e tipos de evento em português', async () => {
+      const event = (id: string, type: string) => ({
+        id,
+        type,
+        createdAt: new Date('2026-10-02T12:00:00.000Z'),
+        rfidCard: null,
+        student: null,
+        device: {
+          id: 'device-1',
+          companyId: COMPANY_ID,
+          code: 'UNI-1',
+          name: 'UniHub 1',
+          bus: null,
+        },
+      });
+      prisma.results['transportEvent.findMany'] = [
+        [event('event-1', 'BOARDING'), event('event-2', 'LEAVING')],
+      ];
+
+      const { report } = await service.getReport(COMPANY_ID, {
+        reportType: 'boarding',
+        startDate: '2026-10-01',
+        endDate: '2026-10-07',
+      });
+
+      expect(report.highlight).toBe('Período 01/10/2026 até 07/10/2026');
+      expect(report.table.rows.map((row) => row.values.type)).toEqual([
+        'Embarque',
+        'Saída',
+      ]);
+    });
+  });
 });
