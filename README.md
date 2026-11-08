@@ -157,7 +157,7 @@ O GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) roda e
 
 - **backend**: `npm ci`, `npx prisma generate`, `npx tsc --noEmit --incremental false` e `npx jest`;
 - **banco**: a suíte com banco de verdade (`npm run test:tenant:docker`, que sobe um PostgreSQL descartável pelo `docker-compose.test.yml`);
-- **frontend**: `npm ci`, `npx tsc --noEmit --incremental false` e `npm run build`.
+- **frontend**: `npm ci`, `npx tsc --noEmit --incremental false`, `npm run lint` e `npm run build`.
 
 Um pull request só deve entrar com as três verdes. Para rodar o mesmo na sua máquina:
 
@@ -171,10 +171,11 @@ npm run test:tenant:down
 
 # frontend/
 npx tsc --noEmit --incremental false
+npm run lint
 npm run build
 ```
 
-O lint ainda não faz parte do CI.
+O lint do backend ainda não faz parte do CI: ele tem erros antigos, que serão limpos depois.
 
 ## Próximos Passos
 
