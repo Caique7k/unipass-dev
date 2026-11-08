@@ -388,4 +388,125 @@ describe('DashboardService', () => {
       expect(eventWhere).not.toHaveProperty('student');
     });
   });
+
+  describe('datas em outro fuso (APP_TIMEZONE)', () => {
+    const serviceIn = (timeZone: string) =>
+      new DashboardService(prisma.prisma, {
+        get: (key: string) => (key === 'APP_TIMEZONE' ? timeZone : undefined),
+      } as unknown as ConfigService);
+
+    // A 1ª leitura de eventos: a janela do painel ou o período do relatório.
+    const eventPeriod = () =>
+      whereOf(prisma.calls.find((call) => call.model === 'transportEvent'))
+        .createdAt;
+
+    it('America/Manaus: o painel vai do começo de 26/10 ao fim de 01/11 em Manaus', async () => {
+      const metrics = await serviceIn('America/Manaus').getMetrics(
+        COMPANY_ID,
+        'DRIVER',
+      );
+
+      expect(metrics.dateKey).toBe('2026-11-01');
+      expect(eventPeriod()).toEqual({
+        gte: new Date('2026-10-26T04:00:00.000Z'),
+        lte: new Date('2026-11-02T03:59:59.999Z'),
+      });
+      // "Criados hoje" também conta a partir do começo de hoje em Manaus.
+      const createdToday = prisma.calls.find(
+        (call) => call.model === 'student' && 'createdAt' in whereOf(call),
+      );
+      expect(whereOf(createdToday).createdAt).toEqual({
+        gte: new Date('2026-11-01T04:00:00.000Z'),
+      });
+    });
+
+    it('America/Manaus: o período do relatório cobre os dias inteiros em Manaus', async () => {
+      await serviceIn('America/Manaus').getReport(COMPANY_ID, {
+        reportType: 'boarding',
+        startDate: '2026-10-01',
+        endDate: '2026-10-07',
+      });
+
+      expect(eventPeriod()).toEqual({
+        gte: new Date('2026-10-01T04:00:00.000Z'),
+        lte: new Date('2026-10-08T03:59:59.999Z'),
+      });
+    });
+
+    it('America/New_York: 01/11 tem 25 h e a janela vai até o fim dele', async () => {
+      const metrics = await serviceIn('America/New_York').getMetrics(
+        COMPANY_ID,
+        'DRIVER',
+      );
+
+      expect(metrics.dateKey).toBe('2026-11-01');
+      expect(eventPeriod()).toEqual({
+        gte: new Date('2026-10-26T04:00:00.000Z'),
+        lte: new Date('2026-11-02T04:59:59.999Z'),
+      });
+    });
+  });
+
+  describe('"pagos no mês" no fuso da aplicação (America/Sao_Paulo)', () => {
+    const paidSince = () =>
+      whereOf(
+        prisma.calls.find(
+          (call) =>
+            call.model === 'billingCharge' && whereOf(call).status === 'PAID',
+        ),
+      ).paidAt;
+
+    it('conta a partir do começo do dia 1 em Brasília, não da meia-noite UTC', async () => {
+      await service.getMetrics(COMPANY_ID, 'ADMIN');
+
+      expect(paidSince()).toEqual({
+        gte: new Date('2026-11-01T03:00:00.000Z'),
+      });
+    });
+
+    it('virada do mês: 31/10 às 22h30 em Brasília (já 01/11 em UTC) ainda é outubro', async () => {
+      jest.setSystemTime(new Date('2026-11-01T01:30:00.000Z'));
+
+      const metrics = await service.getMetrics(COMPANY_ID, 'ADMIN');
+
+      expect(metrics.dateKey).toBe('2026-10-31');
+      expect(paidSince()).toEqual({
+        gte: new Date('2026-10-01T03:00:00.000Z'),
+      });
+    });
+  });
+
+  describe('rótulos do relatório', () => {
+    it('período e tipos de evento em português', async () => {
+      const event = (id: string, type: string) => ({
+        id,
+        type,
+        createdAt: new Date('2026-10-02T12:00:00.000Z'),
+        rfidCard: null,
+        student: null,
+        device: {
+          id: 'device-1',
+          companyId: COMPANY_ID,
+          code: 'UNI-1',
+          name: 'UniHub 1',
+          bus: null,
+        },
+      });
+      prisma.results['transportEvent.findMany'] = [
+        [event('event-1', 'BOARDING'), event('event-2', 'LEAVING')],
+      ];
+
+      const { report } = await service.getReport(COMPANY_ID, {
+        reportType: 'boarding',
+        startDate: '2026-10-01',
+        endDate: '2026-10-07',
+      });
+
+      expect(report.highlight).toBe('Período 01/10/2026 até 07/10/2026');
+      expect(report.table.rows.map((row) => row.values.type)).toEqual([
+        'Embarque',
+        'Saída',
+      ]);
+    });
+  });
 });

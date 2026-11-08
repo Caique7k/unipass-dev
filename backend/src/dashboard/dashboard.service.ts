@@ -10,6 +10,8 @@ import {
   addDaysToDateKey,
   getAppTimeZone,
   getZonedDateParts,
+  getZonedDayEnd,
+  getZonedDayStart,
 } from '../notifications/notification-time.util';
 import {
   eventDeviceSelect,
@@ -464,7 +466,9 @@ export class DashboardService {
     );
 
     const billing =
-      role === 'ADMIN' ? await this.getBillingSnapshot(companyId, now) : null;
+      role === 'ADMIN'
+        ? await this.getBillingSnapshot(companyId, now, todayKey)
+        : null;
 
     const metrics: DashboardMetricsResponse = {
       generatedAt: now.toISOString(),
@@ -617,10 +621,10 @@ export class DashboardService {
   private async getBillingSnapshot(
     companyId: string,
     now: Date,
+    todayKey: string,
   ): Promise<DashboardBillingSnapshot> {
-    const monthStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
-    );
+    // Começo do dia 1 do mês de "hoje", no fuso da aplicação.
+    const monthStart = this.parseDateKey(`${todayKey.slice(0, 7)}-01`, false);
 
     // As regras vêm do módulo financeiro para que o painel e a tela de boletos
     // nunca mostrem contagens diferentes da mesma coisa.
@@ -2139,9 +2143,13 @@ export class DashboardService {
     } satisfies Prisma.DateTimeFilter;
   }
 
+  // Começo ou fim do dia no fuso da aplicação, como o "hoje" de getDateKey.
   private parseDateKey(dateKey: string, endOfDay: boolean) {
-    const time = endOfDay ? '23:59:59.999' : '00:00:00.000';
-    return new Date(`${dateKey}T${time}-03:00`);
+    const timeZone = this.getTimeZone();
+
+    return endOfDay
+      ? getZonedDayEnd(dateKey, timeZone)
+      : getZonedDayStart(dateKey, timeZone);
   }
 
   private createDailyChartData<T extends Record<string, number>>(
@@ -2191,13 +2199,11 @@ export class DashboardService {
     }).format(value);
   }
 
-  private formatDate(date: Date) {
-    return new Intl.DateTimeFormat('pt-BR', {
-      timeZone: this.getTimeZone(),
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    }).format(date);
+  // AAAA-MM-DD -> DD/MM/AAAA: o dia do calendário, sem passar por instante.
+  private formatDateKey(dateKey: string) {
+    const [year, month, day] = dateKey.split('-');
+
+    return `${day}/${month}/${year}`;
   }
 
   private formatDateTime(date: Date) {
@@ -2212,7 +2218,7 @@ export class DashboardService {
   }
 
   private formatPeriodLabel(startDate: string, endDate: string) {
-    return `Periodo ${this.formatDate(this.parseDateKey(startDate, false))} ate ${this.formatDate(this.parseDateKey(endDate, true))}`;
+    return `Período ${this.formatDateKey(startDate)} até ${this.formatDateKey(endDate)}`;
   }
 
   private getDateKey(date: Date) {
@@ -2225,9 +2231,9 @@ export class DashboardService {
 
   private formatEventType(type: EventType) {
     const labels: Record<EventType, string> = {
-      BOARDING: 'Boarding',
+      BOARDING: 'Embarque',
       DEBOARDING: 'Desembarque',
-      LEAVING: 'Saida',
+      LEAVING: 'Saída',
       DENIED: 'Negado',
     };
 
