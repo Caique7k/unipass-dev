@@ -9,7 +9,7 @@ import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useTheme } from "@/app/contexts/ThemeContext";
 import { roleLabels } from "@/lib/permissions";
-import { buildNavGroups, findActiveItem } from "./nav";
+import { buildNavGroups, findActiveItem, MY_TRIP_HREF } from "./nav";
 import { CommandPalette } from "./CommandPalette";
 import { ACCENT, spring } from "./components/primitives";
 
@@ -21,7 +21,11 @@ export default function Topbar() {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   const homeHref =
-    user?.role === "PLATFORM_ADMIN" ? "/dashboard/companies" : "/dashboard";
+    user?.role === "PLATFORM_ADMIN"
+      ? "/dashboard/companies"
+      : user?.role === "USER"
+        ? MY_TRIP_HREF
+        : "/dashboard";
 
   const active = useMemo(
     () => findActiveItem(buildNavGroups(user?.role), pathname),

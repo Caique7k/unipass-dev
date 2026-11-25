@@ -162,3 +162,218 @@ describe('TransportService.handleIotRead', () => {
     await expect(read()).resolves.toMatchObject({ action: 'BOARDING' });
   });
 });
+
+describe('TransportService.getMyTripToday', () => {
+  // 22:30 de 01/12 em Brasília (já é 02/12 em UTC).
+  const NOW = new Date('2026-12-02T01:30:00.000Z');
+  const USER_ID = 'user-1';
+  const EMPTY_TRIP = { studentName: null, onBoard: false, events: [] };
+  const bus = { id: 'bus-1', plate: 'ABC1D23', capacity: 40 };
+  const eventDevice = {
+    id: device.id,
+    companyId: COMPANY as string | null,
+    code: device.code,
+    name: 'UniHub 1',
+    bus,
+  };
+
+  // Só os dois modelos que a viagem consulta: qualquer outra consulta quebra
+  // o teste, em vez de passar sem a verificação de empresa.
+  const prisma = {
+    user: { findFirst: jest.fn() },
+    transportEvent: { findMany: jest.fn() },
+  };
+  const serviceIn = (timeZone: string) =>
+    new TransportService(
+      prisma as unknown as PrismaService,
+      {
+        get: (key: string) => (key === 'APP_TIMEZONE' ? timeZone : undefined),
+      } as unknown as ConfigService,
+    );
+  const myTrip = (timeZone = 'America/Sao_Paulo') =>
+    serviceIn(timeZone).getMyTripToday(USER_ID, COMPANY);
+  const event = (type: string, at: string, from = eventDevice) => ({
+    type,
+    createdAt: new Date(at),
+    device: from,
+  });
+
+  type Query = { where: Record<string, unknown>; orderBy?: unknown };
+  const queriesOf = (mock: jest.Mock) =>
+    (mock.mock.calls as [Query][]).map(([args]) => args);
+  const eventQuery = () => queriesOf(prisma.transportEvent.findMany)[0];
+
+  beforeEach(() => {
+    jest.useFakeTimers({
+      now: NOW,
+      doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+    });
+    prisma.user.findFirst.mockReset().mockResolvedValue({
+      student: { id: student.id, name: student.name },
+    });
+    prisma.transportEvent.findMany.mockReset().mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  describe('o que é consultado', () => {
+    it('toda consulta leva o companyId do login', async () => {
+      await myTrip();
+
+      const queries = [
+        ...queriesOf(prisma.user.findFirst),
+        ...queriesOf(prisma.transportEvent.findMany),
+      ];
+      expect(queries).toHaveLength(2);
+      expect(queries.map(({ where }) => where.companyId)).toEqual([
+        COMPANY,
+        COMPANY,
+      ]);
+    });
+
+    it('o aluno é o do login: ativo e da mesma empresa', async () => {
+      await myTrip();
+
+      expect(queriesOf(prisma.user.findFirst)[0].where).toEqual({
+        id: USER_ID,
+        companyId: COMPANY,
+        student: { companyId: COMPANY, active: true },
+      });
+    });
+
+    it('os eventos são só os embarques e desembarques desse aluno, em ordem de horário', async () => {
+      await myTrip();
+
+      const { where, orderBy } = eventQuery();
+      expect(Object.keys(where).sort()).toEqual([
+        'companyId',
+        'createdAt',
+        'studentId',
+        'type',
+      ]);
+      expect(where).toMatchObject({
+        companyId: COMPANY,
+        studentId: student.id,
+        type: { in: ['BOARDING', 'DEBOARDING'] },
+      });
+      expect(orderBy).toEqual({ createdAt: 'asc' });
+    });
+  });
+
+  describe('"hoje" no fuso da aplicação', () => {
+    it('America/Sao_Paulo: às 22h30 de 01/12 (02/12 em UTC) ainda é 01/12', async () => {
+      await myTrip();
+
+      expect(eventQuery().where.createdAt).toEqual({
+        gte: new Date('2026-12-01T03:00:00.000Z'),
+        lte: new Date('2026-12-02T02:59:59.999Z'),
+      });
+    });
+
+    it('America/Manaus: o mesmo dia, uma hora depois em UTC', async () => {
+      await myTrip('America/Manaus');
+
+      expect(eventQuery().where.createdAt).toEqual({
+        gte: new Date('2026-12-01T04:00:00.000Z'),
+        lte: new Date('2026-12-02T03:59:59.999Z'),
+      });
+    });
+
+    it('à meia-noite em Brasília, a janela já é a do dia seguinte', async () => {
+      jest.setSystemTime(new Date('2026-12-02T03:00:00.000Z'));
+
+      await myTrip();
+
+      expect(eventQuery().where.createdAt).toEqual({
+        gte: new Date('2026-12-02T03:00:00.000Z'),
+        lte: new Date('2026-12-03T02:59:59.999Z'),
+      });
+    });
+  });
+
+  describe('o que volta', () => {
+    it('último evento BOARDING: a bordo, só com nome, tipo, horário e ônibus', async () => {
+      prisma.transportEvent.findMany.mockResolvedValue([
+        event('BOARDING', '2026-12-01T10:00:00.000Z'),
+        event('DEBOARDING', '2026-12-01T10:40:00.000Z'),
+        event('BOARDING', '2026-12-01T21:00:00.000Z'),
+      ]);
+
+      await expect(myTrip()).resolves.toEqual({
+        studentName: student.name,
+        onBoard: true,
+        events: [
+          {
+            type: 'BOARDING',
+            at: new Date('2026-12-01T10:00:00.000Z'),
+            busPlate: bus.plate,
+          },
+          {
+            type: 'DEBOARDING',
+            at: new Date('2026-12-01T10:40:00.000Z'),
+            busPlate: bus.plate,
+          },
+          {
+            type: 'BOARDING',
+            at: new Date('2026-12-01T21:00:00.000Z'),
+            busPlate: bus.plate,
+          },
+        ],
+      });
+    });
+
+    it('último evento DEBOARDING: fora do ônibus', async () => {
+      prisma.transportEvent.findMany.mockResolvedValue([
+        event('BOARDING', '2026-12-01T10:00:00.000Z'),
+        event('DEBOARDING', '2026-12-01T10:40:00.000Z'),
+      ]);
+
+      await expect(myTrip()).resolves.toMatchObject({ onBoard: false });
+    });
+
+    it('sem evento hoje: o nome do aluno, fora do ônibus e lista vazia', async () => {
+      await expect(myTrip()).resolves.toEqual({
+        studentName: student.name,
+        onBoard: false,
+        events: [],
+      });
+    });
+
+    it.each([
+      ['hoje é de outra empresa', { ...eventDevice, companyId: 'company-2' }],
+      ['foi removido', { ...eventDevice, companyId: null }],
+    ])('UniHub que %s: o evento aparece sem ônibus', async (_case, from) => {
+      prisma.transportEvent.findMany.mockResolvedValue([
+        event('BOARDING', '2026-12-01T10:00:00.000Z', from),
+      ]);
+
+      await expect(myTrip()).resolves.toMatchObject({
+        onBoard: true,
+        events: [{ type: 'BOARDING', busPlate: null }],
+      });
+    });
+  });
+
+  describe('estado vazio', () => {
+    it.each([
+      ['não achou login da empresa com aluno ativo', null],
+      ['login sem aluno', { student: null }],
+    ])('%s: nenhum evento é consultado', async (_case, login) => {
+      prisma.user.findFirst.mockResolvedValue(login);
+
+      await expect(myTrip()).resolves.toEqual(EMPTY_TRIP);
+      expect(prisma.transportEvent.findMany).not.toHaveBeenCalled();
+    });
+
+    it('login sem empresa: nenhuma consulta é feita', async () => {
+      await expect(
+        serviceIn('America/Sao_Paulo').getMyTripToday(USER_ID, null),
+      ).resolves.toEqual(EMPTY_TRIP);
+
+      expect(prisma.user.findFirst).not.toHaveBeenCalled();
+      expect(prisma.transportEvent.findMany).not.toHaveBeenCalled();
+    });
+  });
+});
