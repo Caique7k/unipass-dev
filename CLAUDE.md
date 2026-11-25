@@ -316,6 +316,8 @@ Firmware do protótipo em `firmware/unihub/` (ESP8266 + RC522, Wi-Fi, credenciai
 
 ## 15. Últimas alterações (changelog de sessões)
 
+- **2026-11-25 (build do frontend sem `BACKEND_URL`)**: o rewrite de `/api/:path*` para `${BACKEND_URL}/:path*`, adicionado em `frontend/next.config.ts` no commit a975284, quebrava o `next build` onde a variável não existe (CI, Docker local): o destino virava `undefined/:path*` e o build parava com "Invalid rewrite found". Agora o rewrite só é criado com `BACKEND_URL` definida; sem ela, o build fica como antes do a975284. `BACKEND_URL` documentada como opcional no `frontend/.env.local.example`.
+
 - **2026-11-08 (datas do dashboard no fuso da aplicação + rótulos do relatório)**: corrige os 3 problemas de "Datas do dashboard", que estavam na seção 12 desde 2026-11-02; a regra está na seção 6.
   - **Causa**: o `parseDateKey` montava o começo e o fim do dia com `-03:00` fixo, enquanto o "hoje" vinha do `APP_TIMEZONE`, então só batia com `America/Sao_Paulo`. "Pagos no mês" usava `Date.UTC(ano, mês, 1)`, a meia-noite UTC do dia 1: das 21h à meia-noite do último dia do mês (horário de Brasília), o painel já contava o mês seguinte. O DTO de relatórios só tinha `@Matches`, então `2026-02-30` chegava ao service (virava 02/03) e `endDate=2026-13-45` dava 500.
   - **Correção**:
