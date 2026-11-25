@@ -6,7 +6,7 @@ import { motion } from "motion/react";
 import { Toaster } from "sonner";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { SidebarProvider } from "@/app/contexts/SidebarContext";
-import Sidebar from "./Sidebar";
+import Sidebar, { SidebarBackdrop } from "./Sidebar";
 import Topbar from "./Topbar";
 import { DashboardShellSkeleton } from "./components/DashboardSkeletons";
 import { ACCENT } from "./components/primitives";
@@ -50,7 +50,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   return (
     <SidebarProvider>
-      <div className="relative flex h-screen overflow-hidden bg-background">
+      <div className="relative flex h-dvh overflow-hidden bg-background">
         {/* Halo fixo de fundo: dá cor ao painel sem competir com o conteúdo. */}
         <div
           aria-hidden
@@ -58,6 +58,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           style={{ backgroundColor: `${ACCENT}12` }}
         />
 
+        <SidebarBackdrop />
         <Sidebar />
 
         <div className="relative flex min-w-0 flex-1 flex-col">

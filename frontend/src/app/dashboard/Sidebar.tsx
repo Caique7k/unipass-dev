@@ -15,7 +15,7 @@ import { ACCENT, spring } from "./components/primitives";
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { isOpen } = useSidebar();
+  const { isOpen, closeOnMobile } = useSidebar();
   const { user, loading, logout } = useAuth();
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
 
@@ -31,7 +31,12 @@ export default function Sidebar() {
     <motion.aside
       animate={{ width: isOpen ? 264 : 76 }}
       transition={spring}
-      className="relative z-20 flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar/80 backdrop-blur-xl"
+      className={cn(
+        "relative z-20 flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar/80 backdrop-blur-xl",
+        isOpen
+          ? "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:bg-sidebar"
+          : "max-md:hidden",
+      )}
     >
       <div
         className={cn(
@@ -123,6 +128,7 @@ export default function Sidebar() {
                             item={item}
                             isOpen={isOpen}
                             active={isItemActive(item, pathname)}
+                            onSelect={closeOnMobile}
                           />
                         </li>
                       ))}
@@ -171,20 +177,39 @@ export default function Sidebar() {
   );
 }
 
+/** Só no celular: fundo escuro atrás do menu aberto; tocar nele fecha. */
+export function SidebarBackdrop() {
+  const { isOpen, toggle } = useSidebar();
+
+  if (!isOpen) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label="Fechar menu"
+      className="absolute inset-0 z-40 bg-black/50 md:hidden"
+    />
+  );
+}
+
 function SidebarLink({
   item,
   isOpen,
   active,
+  onSelect,
 }: {
   item: NavItem;
   isOpen: boolean;
   active: boolean;
+  onSelect: () => void;
 }) {
   const Icon = item.icon;
 
   return (
     <Link
       href={item.href}
+      onClick={onSelect}
       title={isOpen ? undefined : item.label}
       aria-current={active ? "page" : undefined}
       className={cn(
