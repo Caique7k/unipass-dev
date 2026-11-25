@@ -1,12 +1,15 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ArrowUpRight, Pause, Play, RefreshCw } from "lucide-react";
 import { useAuth } from "@/app/contexts/AuthContext";
 import { useDashboard } from "../../hooks/useDashboard";
 import { DashboardContent } from "./DashboardContent";
 import { LiveDot, Panel, SectionLabel } from "./primitives";
+import { MY_TRIP_HREF } from "../nav";
 import { cn } from "@/lib/utils";
 
 function formatLastUpdated(date: Date | null) {
@@ -129,6 +132,17 @@ function PlaceholderPanel({
   );
 }
 
+/** O aluno não tem métricas da empresa: a página inicial dele é a viagem. */
+function RedirectToMyTrip() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace(MY_TRIP_HREF);
+  }, [router]);
+
+  return null;
+}
+
 export function DashboardView() {
   const { user } = useAuth();
 
@@ -144,17 +158,7 @@ export function DashboardView() {
   }
 
   if (user?.role === "USER") {
-    return (
-      <PlaceholderPanel
-        label="Área do aluno"
-        title="Seus horários e cobranças"
-        description="Este perfil ficou reservado para os próximos passos: rastreamento em tempo real, lembretes de boleto e presença de ida e volta."
-        links={[
-          { href: "/dashboard/billing", label: "Meus boletos" },
-          { href: "/dashboard/app", label: "Aplicativo" },
-        ]}
-      />
-    );
+    return <RedirectToMyTrip />;
   }
 
   return <CompanyDashboard />;
