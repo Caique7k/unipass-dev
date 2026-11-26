@@ -40,7 +40,8 @@ import {
 } from "../components/primitives";
 
 const BOARDED_PAGE_SIZE = 5;
-const REFRESH_INTERVAL_MS = 30000;
+// Curto de propósito, para a demonstração do TCC (CLAUDE.md, seção 12).
+const REFRESH_INTERVAL_MS = 5000;
 
 type BoardedStudent = {
   id: string;

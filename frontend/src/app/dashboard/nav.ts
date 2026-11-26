@@ -1,6 +1,7 @@
 import {
   BookUser,
   Building2,
+  Bus,
   ClipboardList,
   Compass,
   FileBarChart2,
@@ -28,6 +29,9 @@ export type NavItem = {
   matchNested?: boolean;
 };
 
+/** Página inicial do aluno (USER). */
+export const MY_TRIP_HREF = "/dashboard/my-trip";
+
 export type NavGroup = {
   id: string;
   label: string;
@@ -42,6 +46,7 @@ export function buildNavGroups(role: UserRole | undefined): NavGroup[] {
   const canManageCompany = hasRole(role, ["ADMIN"]);
   const canViewOperations = hasRole(role, ["ADMIN", "DRIVER", "COORDINATOR"]);
   const isPlatformAdmin = hasRole(role, ["PLATFORM_ADMIN"]);
+  const isStudent = hasRole(role, ["USER"]);
 
   const groups: NavGroup[] = [
     {
@@ -56,14 +61,23 @@ export function buildNavGroups(role: UserRole | undefined): NavGroup[] {
               keywords: ["clientes", "tenants"],
             },
           ]
-        : [
-            {
-              href: "/dashboard",
-              label: "Visão geral",
-              icon: Home,
-              keywords: ["dashboard", "início", "home"],
-            },
-          ],
+        : isStudent
+          ? [
+              {
+                href: MY_TRIP_HREF,
+                label: "Minha viagem",
+                icon: Bus,
+                keywords: ["embarque", "desembarque", "ônibus", "tag"],
+              },
+            ]
+          : [
+              {
+                href: "/dashboard",
+                label: "Visão geral",
+                icon: Home,
+                keywords: ["dashboard", "início", "home"],
+              },
+            ],
     },
     {
       id: "aplicativo",

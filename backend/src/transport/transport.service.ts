@@ -5,11 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma } from '@prisma/client';
+import { EventType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   getAppTimeZone,
   getZonedDateParts,
+  getZonedDayEnd,
+  getZonedDayStart,
 } from 'src/notifications/notification-time.util';
 import { safeCompareStrings } from 'src/security/secure-compare.util';
 import { BoardingDto } from './dto/boarding.dto';
@@ -24,6 +26,12 @@ import { eventDeviceSelect, eventsSeenByCompany } from './event-device.util';
 // Mesma TAG no mesmo UniHub dentro desta janela é tratada como leitura repetida
 // (aluno segurando o cartão no leitor), e não como embarque seguido de desembarque.
 const IOT_REPEAT_WINDOW_MS = 5_000;
+
+type MyTrip = {
+  studentName: string | null;
+  onBoard: boolean;
+  events: Array<{ type: EventType; at: Date; busPlate: string | null }>;
+};
 
 @Injectable()
 export class TransportService {
@@ -575,6 +583,74 @@ export class TransportService {
       boardedStudents,
       notBoardedStudents,
     };
+  }
+
+  /**
+   * "Minha viagem": os embarques e desembarques de hoje do aluno do login
+   * (USER). Login sem empresa, sem aluno, com aluno inativo ou com aluno de
+   * outra empresa recebe o estado vazio. Recusas (DENIED) não aparecem, e a
+   * resposta não leva nenhum id, TAG ou credencial de aparelho.
+   */
+  async getMyTripToday(
+    userId: string,
+    companyId: string | null,
+  ): Promise<MyTrip> {
+    const student = companyId
+      ? await this.findLoginStudent(userId, companyId)
+      : null;
+
+    if (!companyId || !student) {
+      return { studentName: null, onBoard: false, events: [] };
+    }
+
+    const timeZone = getAppTimeZone(
+      this.configService.get<string>('APP_TIMEZONE'),
+    );
+    const todayKey = getZonedDateParts(new Date(), timeZone).dateKey;
+    const recordedEvents = await this.prisma.transportEvent.findMany({
+      where: {
+        companyId,
+        studentId: student.id,
+        type: { in: ['BOARDING', 'DEBOARDING'] },
+        createdAt: {
+          gte: getZonedDayStart(todayKey, timeZone),
+          lte: getZonedDayEnd(todayKey, timeZone),
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        type: true,
+        createdAt: true,
+        device: { select: eventDeviceSelect },
+      },
+    });
+
+    const events = eventsSeenByCompany(recordedEvents, companyId).map(
+      (event) => ({
+        type: event.type,
+        at: event.createdAt,
+        busPlate: event.device.bus?.plate ?? null,
+      }),
+    );
+
+    return {
+      studentName: student.name,
+      onBoard: events.at(-1)?.type === 'BOARDING',
+      events,
+    };
+  }
+
+  private async findLoginStudent(userId: string, companyId: string) {
+    const login = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        companyId,
+        student: { companyId, active: true },
+      },
+      select: { student: { select: { id: true, name: true } } },
+    });
+
+    return login?.student ?? null;
   }
 
   private async logDenied(device: any, card?: any, studentId?: string) {

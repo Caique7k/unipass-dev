@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { buildApiUrl } from "@/services/api";
 import type { DashboardMetrics } from "../dashboard/types/dashboard";
 
-const REFRESH_INTERVAL_MS = 15000;
+// Curto de propósito, para a demonstração do TCC (CLAUDE.md, seção 12).
+const REFRESH_INTERVAL_MS = 5000;
 
 export function useDashboard() {
   const [data, setData] = useState<DashboardMetrics | null>(null);
